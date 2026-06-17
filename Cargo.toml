@@ -1,0 +1,39 @@
+[package]
+name = "winharpoon"
+version = "0.1.0"
+edition = "2021"
+description = "Harpoon-style window switcher for Windows"
+license = "MIT"
+
+[dependencies]
+directories = "6"
+eframe = { version = "0.34", default-features = false, features = ["default_fonts", "glow"] }
+egui = "0.34"
+nucleo-matcher = "0.3"
+parking_lot = "0.12"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8.23"
+tray-icon = "0.24"
+winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
+raw-window-handle = "0.6"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_System_LibraryLoader",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Registry",
+    "Win32_UI_Shell",
+    "Win32_UI_Controls",
+    "Win32_UI_WindowsAndMessaging",
+] }
+winrt-toast-reborn = "0.3.8"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

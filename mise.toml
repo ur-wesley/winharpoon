@@ -1,0 +1,18 @@
+[tools]
+rust = "1.96.0"
+
+[tasks.dev]
+description = "Run WinHarpoon in debug mode"
+run = "cargo run"
+
+[tasks.build]
+description = "Build debug binary"
+run = "cargo build"
+
+[tasks."build:release"]
+description = "Build release binary"
+run = "cargo build --release"
+
+[tasks.check]
+description = "Type-check without producing a binary"
+run = "cargo check"
