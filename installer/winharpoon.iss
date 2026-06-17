@@ -25,6 +25,9 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
+[CustomMessages]
+english.AdditionalTasks=Additional tasks:
+
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalTasks}"; Flags: unchecked
 Name: "autostart"; Description: "Start WinHarpoon when Windows starts"; GroupDescription: "{cm:AdditionalTasks}"; Flags: checkedonce
