@@ -1,0 +1,118 @@
+{
+  "C:\\Arbeit\\winharpoon\\scripts\\build-installer.ps1": {
+    "mtime": 1781714160.9873147,
+    "hash": "784e10f294b96c8aa1a813ffb3430ba2"
+  },
+  "C:\\Arbeit\\winharpoon\\src\\app.rs": {
+    "mtime": 1781714850.8955903,
+    "hash": "0026f3194ab339811cfd7d5e3a89daca"
+  },
+  "C:\\Arbeit\\winharpoon\\src\\autostart.rs": {
+    "mtime": 1781714449.8019514,
+    "hash": "6a2e0a20008e1f7abe1216edc892403f"
+  },
+  "C:\\Arbeit\\winharpoon\\src\\config.rs": {
+    "mtime": 1781709434.8559873,
+    "hash": "bd81e95922bea99d06fd5f703bb0a2df"
+  },
+  "C:\\Arbeit\\winharpoon\\src\\hotkeys.rs": {
+    "mtime": 1781714451.365537,
+    "hash": "1d5a836dc6d6b58179dadc95253278bf"
+  },
+  "C:\\Arbeit\\winharpoon\\src\\log.rs": {
+    "mtime": 1781702768.0623066,
+    "hash": "fe2973c544297d49c31b1b58c8ee3d87"
+  },
+  "C:\\Arbeit\\winharpoon\\src\\main.rs": {
+    "mtime": 1781714743.8037772,
+    "hash": "a6214663ca61b6fc9a501ced8e6edde5"
+  },
+  "C:\\Arbeit\\winharpoon\\src\\native_ui.rs": {
+    "mtime": 1781714763.894051,
+    "hash": "964a7a463600f3f4c99decb4a51ee22c"
+  },
+  "C:\\Arbeit\\winharpoon\\src\\paths.rs": {
+    "mtime": 1781709463.1054065,
+    "hash": "d0a0b3f9954a4dac8d05c0fc50dca61b"
+  },
+  "C:\\Arbeit\\winharpoon\\src\\platform.rs": {
+    "mtime": 1781714729.1523764,
+    "hash": "bff09cc60fceacf74ff02be58f015f62"
+  },
+  "C:\\Arbeit\\winharpoon\\src\\util.rs": {
+    "mtime": 1781698927.5716805,
+    "hash": "3004a1bc94522806a0fb400e2c16af32"
+  },
+  "C:\\Arbeit\\winharpoon\\src\\launcher\\mod.rs": {
+    "mtime": 1781714768.918673,
+    "hash": "2cbcb0ec8fe4ad08e9dff11abb57fe61"
+  },
+  "C:\\Arbeit\\winharpoon\\src\\launcher\\ui.rs": {
+    "mtime": 1781714802.1129794,
+    "hash": "2b2239a2a46254386b364c5f7712bed4"
+  },
+  "C:\\Arbeit\\winharpoon\\src\\marks_switcher\\hook.rs": {
+    "mtime": 1781714462.4845517,
+    "hash": "b7cb57cbd20634dbdc1c46dca26df5a7"
+  },
+  "C:\\Arbeit\\winharpoon\\src\\marks_switcher\\mod.rs": {
+    "mtime": 1781703036.1901672,
+    "hash": "09aeb8eda48f0bfa076f4b8e8d209f7b"
+  },
+  "C:\\Arbeit\\winharpoon\\src\\marks_switcher\\ui.rs": {
+    "mtime": 1781714826.5118673,
+    "hash": "c2d65b0cfab500914bde05ab72d6ae03"
+  },
+  "C:\\Arbeit\\winharpoon\\src\\modes\\marks.rs": {
+    "mtime": 1781711110.263427,
+    "hash": "8d7f7889459f19c3e27af786c4660066"
+  },
+  "C:\\Arbeit\\winharpoon\\src\\modes\\mod.rs": {
+    "mtime": 1781693176.9787648,
+    "hash": "19fa0cc20a91d7275359c617df4f7923"
+  },
+  "C:\\Arbeit\\winharpoon\\src\\modes\\same_app.rs": {
+    "mtime": 1781698950.7178667,
+    "hash": "17adb190c9aed81b2b2ac9c434b165aa"
+  },
+  "C:\\Arbeit\\winharpoon\\src\\settings\\mod.rs": {
+    "mtime": 1781714755.0938716,
+    "hash": "cdb13a8fa46f122b93ec235fad8ee006"
+  },
+  "C:\\Arbeit\\winharpoon\\src\\settings\\ui.rs": {
+    "mtime": 1781714826.847406,
+    "hash": "2e057add9b3a0a217f03d2c19362be2f"
+  },
+  "C:\\Arbeit\\winharpoon\\src\\tray\\mod.rs": {
+    "mtime": 1781714701.7782354,
+    "hash": "c0d40f1be08831586d459f943fa767c5"
+  },
+  "C:\\Arbeit\\winharpoon\\src\\tray\\ui.rs": {
+    "mtime": 1781714845.3210125,
+    "hash": "430a843f504d2decf36c4bb28914e912"
+  },
+  "C:\\Arbeit\\winharpoon\\src\\window\\enumerate.rs": {
+    "mtime": 1781714448.8096278,
+    "hash": "8cf3c22030b7d92bef0b2624eb8160ba"
+  },
+  "C:\\Arbeit\\winharpoon\\src\\window\\focus.rs": {
+    "mtime": 1781714457.8032315,
+    "hash": "667a3e4e6cd7b01f9bf59affcf74ff09"
+  },
+  "C:\\Arbeit\\winharpoon\\src\\window\\identity.rs": {
+    "mtime": 1781698938.471025,
+    "hash": "300d63ea1723e60763586c683666d62e"
+  },
+  "C:\\Arbeit\\winharpoon\\src\\window\\mod.rs": {
+    "mtime": 1781714755.0822775,
+    "hash": "90a106cb133967f8cc026df72211a455"
+  },
+  "C:\\Arbeit\\winharpoon\\src\\window\\process_name.rs": {
+    "mtime": 1781714458.4100575,
+    "hash": "411da599cdb11a7242d03d438eb1aa14"
+  },
+  "C:\\Arbeit\\winharpoon\\README.md": {
+    "mtime": 1781707967.1213677,
+    "hash": "3b5381f25304218411556cd817401d62"
+  }
+}
