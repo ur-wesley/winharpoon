@@ -1,3 +1,4 @@
 /target
 /dist
 /graphify-out
+/Cargo.lock
