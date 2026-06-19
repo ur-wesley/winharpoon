@@ -67,6 +67,8 @@ impl LauncherPanel {
         icon_cache: &mut IconCache,
     ) {
         let ctx = ui.ctx().clone();
+        ctx.request_repaint_after(std::time::Duration::from_millis(250));
+
         if handle_viewport_close(&ctx) {
             self.dismiss(&ctx, marks);
             return;
@@ -90,6 +92,7 @@ impl LauncherPanel {
         }
 
         let max_results = config.lock().launcher.max_results;
+        self.controller.maybe_refresh_windows(max_results);
         let filtered = self.controller.filtered_indices(max_results);
 
         let scroll_to = self.controller.selection.take_scroll();

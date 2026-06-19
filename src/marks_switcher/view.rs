@@ -105,7 +105,7 @@ pub fn render_marks_switcher(
                                     if let Some(win) = &entry.window {
                                         ui.add(
                                             egui::Label::new(
-                                                egui::RichText::new(&win.title)
+                                                egui::RichText::new(&win.process_name)
                                                     .size(11.0)
                                                     .strong()
                                                     .color(primary_list_text_color(

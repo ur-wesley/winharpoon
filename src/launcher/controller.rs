@@ -38,6 +38,7 @@ pub struct LauncherController {
     pub last_query: String,
     search: FuzzySearch,
     search_labels: Vec<String>,
+    pub last_refresh: Option<std::time::Instant>,
 }
 
 impl Default for LauncherController {
@@ -56,6 +57,7 @@ impl Default for LauncherController {
             last_query: String::new(),
             search: FuzzySearch::default(),
             search_labels: Vec::new(),
+            last_refresh: None,
         }
     }
 }
@@ -79,6 +81,7 @@ impl LauncherController {
         self.selection.selected = 0;
         self.selection.scroll_to_selected = true;
         self.visible = true;
+        self.last_refresh = Some(std::time::Instant::now());
 
         let cfg = config.lock().launcher.clone();
         self.panel_width = cfg.width;
@@ -88,6 +91,50 @@ impl LauncherController {
             self.windows.len(),
             self.foreground_hwnd
         ));
+    }
+
+    pub fn maybe_refresh_windows(&mut self, max_results: usize) {
+        let now = std::time::Instant::now();
+        if let Some(last) = self.last_refresh {
+            if now.duration_since(last) < std::time::Duration::from_millis(500) {
+                return;
+            }
+        }
+        self.last_refresh = Some(now);
+
+        let new_windows = enumerate_windows(None);
+        self.update_windows_and_selection(new_windows, max_results);
+    }
+
+    pub(crate) fn update_windows_and_selection(&mut self, new_windows: Vec<WindowInfo>, max_results: usize) {
+        if new_windows != self.windows {
+            let old_filtered = self.filtered_indices(max_results);
+            let old_active_hwnd = self.active_window(&old_filtered).map(|w| w.hwnd);
+
+            self.windows = new_windows;
+            self.rebuild_search_labels();
+
+            let new_filtered = self.filtered_indices(max_results);
+
+            if let Some(hwnd) = old_active_hwnd {
+                if let Some(new_pos) = new_filtered.iter().position(|&idx| self.windows[idx].hwnd == hwnd) {
+                    self.selection.selected = new_pos;
+                } else {
+                    if new_filtered.is_empty() {
+                        self.selection.selected = 0;
+                    } else if self.selection.selected >= new_filtered.len() {
+                        self.selection.selected = new_filtered.len() - 1;
+                    }
+                }
+            } else {
+                if new_filtered.is_empty() {
+                    self.selection.selected = 0;
+                } else if self.selection.selected >= new_filtered.len() {
+                    self.selection.selected = new_filtered.len() - 1;
+                }
+            }
+            self.selection.hovered = None;
+        }
     }
 
     pub fn panel_size(&self) -> (f32, f32) {
@@ -345,5 +392,34 @@ mod tests {
         controller.selection.selected = 0;
         let effect = controller.post_frame_effects(&[0]);
         assert!(matches!(effect, LauncherEffect::Preview(9)));
+    }
+
+    #[test]
+    fn update_windows_and_selection_preserves_selection() {
+        let win1 = test_window(101, "One", "one");
+        let win2 = test_window(102, "Two", "two");
+        let win3 = test_window(103, "Three", "three");
+
+        let mut controller = sample_controller(vec![win1.clone(), win2.clone()]);
+        controller.selection.selected = 1;
+
+        let new_windows = vec![win1.clone(), win3.clone(), win2.clone()];
+        controller.update_windows_and_selection(new_windows, 16);
+
+        assert_eq!(controller.selection.selected, 2);
+    }
+
+    #[test]
+    fn update_windows_and_selection_clamps_selection() {
+        let win1 = test_window(101, "One", "one");
+        let win2 = test_window(102, "Two", "two");
+
+        let mut controller = sample_controller(vec![win1.clone(), win2.clone()]);
+        controller.selection.selected = 1;
+
+        let new_windows = vec![win1.clone()];
+        controller.update_windows_and_selection(new_windows, 16);
+
+        assert_eq!(controller.selection.selected, 0);
     }
 }

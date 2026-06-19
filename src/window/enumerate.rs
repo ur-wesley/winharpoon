@@ -20,7 +20,7 @@ const MAX_TITLE_LEN: usize = 200;
 const MIN_WINDOW_WIDTH: i32 = 80;
 const MIN_WINDOW_HEIGHT: i32 = 40;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowInfo {
     pub hwnd: isize,
     pub title: String,

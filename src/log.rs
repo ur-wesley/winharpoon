@@ -8,8 +8,10 @@ use crate::paths;
 use crate::util;
 
 const APP_ID: &str = "WinHarpoon.App";
+const MAX_LOG_ENTRIES: usize = 5000;
 
 static TOAST_APP_ID: OnceLock<String> = OnceLock::new();
+
 
 pub fn init_toast() {
     let icon = std::env::current_exe()
@@ -66,9 +68,31 @@ fn log_line(level: &str, message: impl AsRef<str>) {
     let _ = io::stderr().write_all(b"\n");
 
     let path = paths::log_path();
-    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
-        let _ = writeln!(file, "{line}");
+    let mut append_ok = false;
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&path) {
+        if writeln!(file, "{line}").is_ok() {
+            append_ok = true;
+        }
     }
+
+    if append_ok {
+        if let Ok(metadata) = std::fs::metadata(&path) {
+            if metadata.len() > 1_000_000 {
+                let _ = prune_log_file(&path);
+            }
+        }
+    }
+}
+
+fn prune_log_file(path: &std::path::Path) -> io::Result<()> {
+    let content = std::fs::read_to_string(path)?;
+    let lines: Vec<&str> = content.lines().collect();
+    if lines.len() > MAX_LOG_ENTRIES {
+        let start = lines.len() - MAX_LOG_ENTRIES;
+        let pruned_content = lines[start..].join("\n") + "\n";
+        std::fs::write(path, pruned_content)?;
+    }
+    Ok(())
 }
 
 fn timestamp() -> String {
@@ -104,3 +128,41 @@ fn set_process_aumid(app_id: &str) -> bool {
     let wide = util::wide(app_id);
     unsafe { SetCurrentProcessExplicitAppUserModelID(PCWSTR(wide.as_ptr())).is_ok() }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_prune_log_file() {
+        let temp_dir = std::env::temp_dir();
+        let test_path = temp_dir.join("test_winharpoon_prune.log");
+        println!("test_path: {:?}", test_path);
+        
+        // Write 6000 lines
+        let mut content = String::new();
+        for i in 0..6000 {
+            content.push_str(&format!("Line {}\n", i));
+        }
+        fs::write(&test_path, &content).unwrap();
+        assert!(test_path.exists(), "File should exist after writing");
+
+        // Prune the file
+        let prune_res = prune_log_file(&test_path);
+        println!("prune_res: {:?}", prune_res);
+        prune_res.unwrap();
+        assert!(test_path.exists(), "File should exist after pruning");
+
+        // Verify the file has 5000 lines
+        let new_content = fs::read_to_string(&test_path).unwrap();
+        let lines: Vec<&str> = new_content.lines().collect();
+        assert_eq!(lines.len(), 5000);
+        assert_eq!(lines[0], "Line 1000");
+        assert_eq!(lines[4999], "Line 5999");
+
+        // Clean up
+        let _ = fs::remove_file(&test_path);
+    }
+}
+
