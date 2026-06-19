@@ -108,7 +108,7 @@ unsafe fn version_string(exe_path: &Path, field: &str) -> Option<String> {
         return None;
     }
 
-    let wide_len = (value_len / 2).saturating_sub(1) as usize;
+    let wide_len = (value_len).saturating_sub(1) as usize;
     let wide = std::slice::from_raw_parts(value_ptr.cast::<u16>(), wide_len);
     Some(util::from_wide(wide))
 }

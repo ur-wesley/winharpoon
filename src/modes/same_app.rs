@@ -2,7 +2,7 @@ use crate::log;
 use crate::window::{enumerate_windows, focus, get_foreground_window, WindowInfo};
 
 pub fn cycle_same_app(forward: bool) {
-    log::debug(&format!("cycle_same_app forward={forward}"));
+    log::debug(format!("cycle_same_app forward={forward}"));
     let Some(current) = get_foreground_window() else {
         log::debug("cycle_same_app: no foreground window");
         return;
@@ -14,7 +14,7 @@ pub fn cycle_same_app(forward: bool) {
         .collect();
 
     if group.len() <= 1 {
-        log::debug(&format!(
+        log::debug(format!(
             "cycle_same_app: only {} window(s) for {}",
             group.len(),
             current.exe_name
@@ -32,7 +32,7 @@ pub fn cycle_same_app(forward: bool) {
         idx - 1
     };
     let next = &group[next_idx];
-    log::debug(&format!(
+    log::debug(format!(
         "cycle_same_app: {} -> {} (idx {idx} -> {next_idx} of {})",
         current.title, next.title, group.len()
     ));

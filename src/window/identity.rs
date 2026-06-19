@@ -31,7 +31,7 @@ pub fn resolve_identity<'a>(
     identity: &WindowIdentity,
     windows: &'a [WindowInfo],
 ) -> Option<&'a WindowInfo> {
-    log::debug(&format!(
+    log::debug(format!(
         "resolve_identity: {} in {} windows",
         identity.display_label(),
         windows.len()
@@ -45,7 +45,7 @@ pub fn resolve_identity<'a>(
         return Some(exact[0]);
     }
     if !exact.is_empty() {
-        log::debug(&format!("resolve_identity: {} exact matches, using first", exact.len()));
+        log::debug(format!("resolve_identity: {} exact matches, using first", exact.len()));
         return Some(exact[0]);
     }
 
@@ -57,7 +57,7 @@ pub fn resolve_identity<'a>(
     if result.is_some() {
         log::debug("resolve_identity: fuzzy match");
     } else {
-        log::warn(&format!("resolve_identity: no match for {}", identity.display_label()));
+        log::warn(format!("resolve_identity: no match for {}", identity.display_label()));
     }
     result
 }

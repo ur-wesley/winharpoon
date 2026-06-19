@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use windows::core::BOOL;
-use windows::Win32::Foundation::{HWND, LPARAM, RECT};
+use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, RECT};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
 use windows::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -38,7 +38,7 @@ pub fn get_foreground_window() -> Option<WindowInfo> {
         }
         let info = window_info(hwnd);
         if let Some(ref w) = info {
-            log::trace(&format!(
+            log::trace(format!(
                 "get_foreground_window: hwnd={} title={} process={}",
                 w.hwnd, w.title, w.process_name
             ));
@@ -48,7 +48,7 @@ pub fn get_foreground_window() -> Option<WindowInfo> {
 }
 
 pub fn enumerate_windows(exclude_hwnd: Option<isize>) -> Vec<WindowInfo> {
-    log::trace(&format!("enumerate_windows exclude={exclude_hwnd:?}"));
+    log::trace(format!("enumerate_windows exclude={exclude_hwnd:?}"));
     let mut windows = Vec::new();
     unsafe {
         let _ = EnumWindows(
@@ -59,8 +59,8 @@ pub fn enumerate_windows(exclude_hwnd: Option<isize>) -> Vec<WindowInfo> {
     if let Some(ex) = exclude_hwnd {
         windows.retain(|w: &WindowInfo| w.hwnd != ex);
     }
-    windows.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
-    log::debug(&format!("enumerate_windows: {} windows", windows.len()));
+    windows.sort_by_key(|a| a.title.to_lowercase());
+    log::debug(format!("enumerate_windows: {} windows", windows.len()));
     windows
 }
 
@@ -86,7 +86,7 @@ unsafe fn window_info(hwnd: HWND) -> Option<WindowInfo> {
     GetWindowTextW(hwnd, &mut title_buf);
     let title = util::from_wide(&title_buf);
     if !is_reasonable_title(&title) {
-        log::trace(&format!("skip hwnd={:?}: bad title len={}", hwnd.0, title.len()));
+        log::trace(format!("skip hwnd={:?}: bad title len={}", hwnd.0, title.len()));
         return None;
     }
 
@@ -99,13 +99,14 @@ unsafe fn window_info(hwnd: HWND) -> Option<WindowInfo> {
     let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
     let mut buf = vec![0u16; 1024];
     let mut size = buf.len() as u32;
-    QueryFullProcessImageNameW(
+    let res = QueryFullProcessImageNameW(
         process,
         PROCESS_NAME_FORMAT(0),
         windows::core::PWSTR(buf.as_mut_ptr()),
         &mut size,
-    )
-    .ok()?;
+    );
+    let _ = CloseHandle(process);
+    res.ok()?;
     let exe_path = PathBuf::from(util::from_wide(&buf[..size as usize]));
     let exe_name = exe_path
         .file_name()

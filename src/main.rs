@@ -1,9 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod apps;
 mod autostart;
 mod config;
 mod hotkeys;
+mod icons;
 mod launcher;
 mod log;
 mod marks_switcher;
@@ -13,6 +15,7 @@ mod paths;
 mod platform;
 mod settings;
 mod tray;
+mod ui;
 mod util;
 mod window;
 
@@ -38,8 +41,8 @@ fn main() {
     }
 
     log::info("starting winharpoon");
-    log::debug(&format!("app data dir: {}", paths::app_data_dir().display()));
-    log::debug(&format!("log file: {}", paths::log_path().display()));
+    log::debug(format!("app data dir: {}", paths::app_data_dir().display()));
+    log::debug(format!("log file: {}", paths::log_path().display()));
     util::release_stuck_modifier_keys();
     log::debug("released stuck modifier keys on startup");
 
@@ -56,23 +59,29 @@ fn main() {
     let config = Arc::new(Mutex::new(Config::load()));
     autostart::sync_from_config(config.lock().general.autostart);
     let marks = shared_marks();
-    let state = Arc::new(Mutex::new(AppState::new(config.clone(), marks.clone())));
+    let favorites = apps::shared_favorites();
+    let state = Arc::new(Mutex::new(AppState::new(config.clone(), marks.clone(), favorites)));
     marks_switcher::init(marks.clone(), config.clone());
     launcher::init(config.clone(), state.clone(), marks);
+    apps::init();
+    apps::hook::reload(&config.lock());
     log::debug("app state initialized");
 
-    let bindings = match config.lock().validate() {
+    let favorite_bindings = state.lock().favorites.lock().hotkey_bindings();
+    let bindings = match config.lock().validate_merged(&favorite_bindings) {
         Ok(bindings) => {
-            log::debug(&format!("config validated, {} bindings", bindings.len()));
+            log::debug(format!("config validated, {} bindings", bindings.len()));
             bindings
         }
         Err(errors) => {
-            log::warn(&format!(
+            log::warn(format!(
                 "config validation failed with {} errors, using raw bindings",
                 errors.len()
             ));
             report_config_errors(&errors);
-            config.lock().bindings()
+            let mut all = config.lock().bindings();
+            all.extend(favorite_bindings);
+            all
         }
     };
 
@@ -83,17 +92,20 @@ fn main() {
 
     hotkeys.lock().run_message_loop(
         state.clone(),
-        |action, state| dispatch_action(action, state),
+        dispatch_action,
         |manager, state| {
             reload_hotkeys(manager, state);
         },
         || {
             crate::marks_switcher::hook::ensure_installed();
+            apps::hook::ensure_installed();
+            apps::maybe_refresh();
             crate::tray::drain_tray_events();
         },
     );
     log::info("message loop exited, shutting down");
     marks_switcher::hook::uninstall_hook();
+    apps::hook::uninstall();
 }
 
 fn handle_installer_flags() -> bool {
@@ -102,12 +114,12 @@ fn handle_installer_flags() -> bool {
         let mut config = Config::load();
         config.general.autostart = true;
         if let Err(err) = config.save() {
-            log::error(&format!("failed to save config for autostart: {err}"));
+            log::error(format!("failed to save config for autostart: {err}"));
             return true;
         }
         match autostart::apply(true) {
             Ok(()) => log::info("autostart enabled by installer"),
-            Err(err) => log::error(&format!("failed to enable autostart: {err}")),
+            Err(err) => log::error(format!("failed to enable autostart: {err}")),
         }
         return true;
     }
@@ -117,7 +129,7 @@ fn handle_installer_flags() -> bool {
         let _ = config.save();
         match autostart::apply(false) {
             Ok(()) => log::info("autostart disabled by uninstaller"),
-            Err(err) => log::error(&format!("failed to disable autostart: {err}")),
+            Err(err) => log::error(format!("failed to disable autostart: {err}")),
         }
         return true;
     }
@@ -136,7 +148,7 @@ fn acquire_single_instance() -> bool {
                 let _ = CloseHandle(handle);
                 return false;
             }
-            log::debug(&format!("CreateMutexW handle: {:?}", handle.0));
+            log::debug(format!("CreateMutexW handle: {:?}", handle.0));
             true
         } else {
             log::error("CreateMutexW failed");

@@ -1,5 +1,6 @@
 pub mod hook;
-pub mod ui;
+pub mod panel;
+mod view;
 
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, OnceLock};

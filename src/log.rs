@@ -19,10 +19,10 @@ pub fn init_toast() {
     match register(
         APP_ID,
         "WinHarpoon",
-        icon.as_ref().map(|path| path.as_path()),
+        icon.as_deref(),
     ) {
-        Ok(()) => debug(&format!("toast AUMID registered: {APP_ID}")),
-        Err(error) => warn(&format!("toast AUMID registration failed: {error}")),
+        Ok(()) => debug(format!("toast AUMID registered: {APP_ID}")),
+        Err(error) => warn(format!("toast AUMID registration failed: {error}")),
     }
 
     let app_id = if set_process_aumid(APP_ID) {
@@ -33,7 +33,7 @@ pub fn init_toast() {
     };
 
     let _ = TOAST_APP_ID.set(app_id.clone());
-    debug(&format!("toast manager ready ({app_id})"));
+    debug(format!("toast manager ready ({app_id})"));
 }
 
 pub fn trace(message: impl AsRef<str>) {
@@ -81,7 +81,7 @@ fn timestamp() -> String {
 }
 
 pub fn notify(title: &str, body: &str) {
-    info(&format!("NOTIFY {title}: {body}"));
+    info(format!("NOTIFY {title}: {body}"));
 
     let Some(app_id) = TOAST_APP_ID.get() else {
         warn("notify called before init_toast");
@@ -93,7 +93,7 @@ pub fn notify(title: &str, body: &str) {
     toast.text1(title).text2(Text::new(body));
 
     if let Err(error) = manager.show(&toast) {
-        warn(&format!("toast show failed: {error}"));
+        warn(format!("toast show failed: {error}"));
     }
 }
 

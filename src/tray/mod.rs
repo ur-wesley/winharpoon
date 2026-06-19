@@ -1,4 +1,6 @@
-pub mod ui;
+pub mod controller;
+pub mod panel;
+mod view;
 
 use std::sync::Arc;
 
@@ -43,7 +45,7 @@ pub fn drain_tray_events() {
             if !matches!(button, MouseButton::Left | MouseButton::Right) {
                 continue;
             }
-            log::debug(&format!(
+            log::debug(format!(
                 "tray click at ({}, {})",
                 position.x, position.y
             ));
@@ -69,20 +71,21 @@ fn tray_tooltip(state: &Arc<Mutex<AppState>>) -> String {
 }
 
 fn tray_icon() -> Option<Icon> {
-    const SIZE: u32 = 32;
-    let mut rgba = vec![0u8; (SIZE * SIZE * 4) as usize];
-    for y in 0..SIZE {
-        for x in 0..SIZE {
-            let i = ((y * SIZE + x) * 4) as usize;
-            let edge = x == 0 || y == 0 || x == SIZE - 1 || y == SIZE - 1;
-            let inner = x >= 8 && x <= 23 && y >= 8 && y <= 23;
-            if edge || inner {
-                rgba[i] = 99;
-                rgba[i + 1] = 140;
-                rgba[i + 2] = 255;
-                rgba[i + 3] = 255;
-            }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Ok(icon) = Icon::from_path(exe, None) {
+            return Some(icon);
         }
     }
-    Icon::from_rgba(rgba, SIZE, SIZE).ok()
+    icon_from_bytes(include_bytes!("../../assets/winharpoon.ico"))
+}
+
+fn icon_from_bytes(bytes: &[u8]) -> Option<Icon> {
+    let image = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?
+        .decode()
+        .ok()?;
+    let rgba = image.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    Icon::from_rgba(rgba.into_raw(), width, height).ok()
 }

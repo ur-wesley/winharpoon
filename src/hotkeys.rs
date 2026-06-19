@@ -19,6 +19,9 @@ const CLASS_NAME: &str = "WinHarpoonHotkeyWindow";
 const WM_RELOAD: u32 = windows::Win32::UI::WindowsAndMessaging::WM_USER + 1;
 pub const WM_MARKS_KEY: u32 = windows::Win32::UI::WindowsAndMessaging::WM_USER + 2;
 pub const WM_JUMP_KEY: u32 = windows::Win32::UI::WindowsAndMessaging::WM_USER + 3;
+pub const WM_APP_MENU: u32 = windows::Win32::UI::WindowsAndMessaging::WM_USER + 4;
+const WM_QUIT_APP: u32 = windows::Win32::UI::WindowsAndMessaging::WM_USER + 5;
+pub const WM_LAUNCHER_KEY: u32 = windows::Win32::UI::WindowsAndMessaging::WM_USER + 6;
 pub const MARKS_POLL_TIMER_ID: usize = 9001;
 
 static HOTKEY_HWND: AtomicIsize = AtomicIsize::new(0);
@@ -33,6 +36,9 @@ pub enum HotkeyAction {
     ToggleMark,
     Mark(u8),
     Jump(u8),
+    MarksSwitcherNext,
+    MarksSwitcherPrev,
+    LaunchFavorite(usize),
 }
 
 #[derive(Debug, Clone)]
@@ -49,12 +55,15 @@ pub struct HotkeyManager {
     results: Vec<HotkeyRegistrationResult>,
 }
 
+unsafe impl Send for HotkeyManager {}
+unsafe impl Sync for HotkeyManager {}
+
 impl HotkeyManager {
     pub fn register(state: &Arc<Mutex<AppState>>, bindings: &[HotkeyBinding]) -> Self {
-        log::debug(&format!("HotkeyManager::register with {} bindings", bindings.len()));
+        log::debug(format!("HotkeyManager::register with {} bindings", bindings.len()));
         let hwnd = unsafe { create_message_window() };
         HOTKEY_HWND.store(hwnd.0 as isize, Ordering::SeqCst);
-        log::debug(&format!("hotkey hwnd: {:?}", hwnd.0));
+        log::debug(format!("hotkey hwnd: {:?}", hwnd.0));
         let mut manager = Self {
             hwnd,
             id_map: HashMap::new(),
@@ -72,7 +81,7 @@ impl HotkeyManager {
     }
 
     pub fn reload(&mut self, state: &Arc<Mutex<AppState>>, bindings: &[HotkeyBinding]) {
-        log::debug(&format!("HotkeyManager::reload with {} bindings", bindings.len()));
+        log::debug(format!("HotkeyManager::reload with {} bindings", bindings.len()));
         self.unregister_all();
         self.apply_bindings(bindings);
         let conflict_count = self.conflict_count();
@@ -94,15 +103,21 @@ impl HotkeyManager {
         let mut next_id: i32 = 1;
 
         for binding in bindings {
-            if matches!(binding.action, HotkeyAction::Jump(_)) {
-                log::debug(&format!(
-                    "skip RegisterHotKey for hook-managed jump binding {}",
+            if matches!(
+                binding.action,
+                HotkeyAction::Launcher
+                    | HotkeyAction::Jump(_)
+                    | HotkeyAction::MarksSwitcherNext
+                    | HotkeyAction::MarksSwitcherPrev
+            ) {
+                log::debug(format!(
+                    "skip RegisterHotKey for hook-managed binding {}",
                     binding.label
                 ));
                 continue;
             }
             let Some(parsed) = &binding.parsed else {
-                log::debug(&format!(
+                log::debug(format!(
                     "skip binding {} (empty or unparseable): {:?}",
                     binding.label, binding.chord
                 ));
@@ -121,13 +136,13 @@ impl HotkeyManager {
             };
             let error = if ok {
                 self.id_map.insert(id, binding.action);
-                log::debug(&format!(
+                log::debug(format!(
                     "RegisterHotKey ok id={id} label={} chord={} mods=0x{:X} vk=0x{:X}",
                     binding.label, binding.chord, parsed.modifiers, parsed.vk
                 ));
                 None
             } else {
-                log::warn(&format!(
+                log::warn(format!(
                     "RegisterHotKey failed id={id} label={} chord={}",
                     binding.label, binding.chord
                 ));
@@ -144,7 +159,7 @@ impl HotkeyManager {
 
     fn unregister_all(&mut self) {
         let ids: Vec<_> = self.id_map.keys().copied().collect();
-        log::debug(&format!("unregister_all: {} hotkeys", ids.len()));
+        log::debug(format!("unregister_all: {} hotkeys", ids.len()));
         for id in ids {
             unsafe {
                 let _ = UnregisterHotKey(Some(self.hwnd), id);
@@ -165,7 +180,7 @@ impl HotkeyManager {
                 log::warn(&msg);
             }
         }
-        log::debug(&format!(
+        log::debug(format!(
             "hotkey registration done: {} ok, {} conflicts",
             self.results.iter().filter(|r| r.success).count(),
             self.conflict_count()
@@ -186,14 +201,17 @@ impl HotkeyManager {
                 if msg.message == WM_HOTKEY {
                     let id = msg.wParam.0 as i32;
                     if let Some(action) = self.id_map.get(&id).copied() {
-                        log::debug(&format!("WM_HOTKEY id={id} action={action:?}"));
+                        log::debug(format!("WM_HOTKEY id={id} action={action:?}"));
                         on_action(action, &state);
                     } else {
-                        log::warn(&format!("WM_HOTKEY unknown id={id}"));
+                        log::warn(format!("WM_HOTKEY unknown id={id}"));
                     }
                 } else if msg.message == WM_RELOAD {
                     log::debug("WM_RELOAD received");
                     on_reload(self, &state);
+                } else if msg.message == WM_QUIT_APP {
+                    log::debug("WM_QUIT_APP received");
+                    break;
                 }
                 let _ = TranslateMessage(&msg);
                 DispatchMessageW(&msg);
@@ -205,7 +223,7 @@ impl HotkeyManager {
 
 pub fn post_reload() {
     let hwnd = HOTKEY_HWND.load(Ordering::SeqCst);
-    log::debug(&format!("post_reload hwnd={hwnd}"));
+    log::debug(format!("post_reload hwnd={hwnd}"));
     if hwnd != 0 {
         unsafe {
             let _ = PostMessageW(Some(HWND(hwnd as *mut _)), WM_RELOAD, WPARAM(0), LPARAM(0));
@@ -223,9 +241,16 @@ pub fn hotkey_hwnd() -> Option<HWND> {
 }
 
 pub fn post_quit() {
-    log::debug("post_quit");
-    unsafe {
-        PostQuitMessage(0);
+    let hwnd = HOTKEY_HWND.load(Ordering::SeqCst);
+    log::debug(format!("post_quit hwnd={hwnd}"));
+    if hwnd != 0 {
+        unsafe {
+            let _ = PostMessageW(Some(HWND(hwnd as *mut _)), WM_QUIT_APP, WPARAM(0), LPARAM(0));
+        }
+    } else {
+        unsafe {
+            PostQuitMessage(0);
+        }
     }
 }
 
@@ -306,6 +331,16 @@ unsafe extern "system" fn window_proc(
     if msg == WM_JUMP_KEY {
         let slot = wparam.0 as u8;
         crate::marks_switcher::hook::dispatch_jump(slot);
+        return LRESULT(0);
+    }
+    if msg == WM_LAUNCHER_KEY {
+        crate::launcher::open();
+        return LRESULT(0);
+    }
+    if msg == WM_APP_MENU {
+        let x = wparam.0 as i32;
+        let y = lparam.0 as i32;
+        crate::apps::hook::dispatch_app_menu(x, y);
         return LRESULT(0);
     }
     DefWindowProcW(hwnd, msg, wparam, lparam)

@@ -19,7 +19,7 @@ pub fn apply(enabled: bool) -> Result<(), String> {
     if enabled {
         let exe = std::env::current_exe().map_err(|err| err.to_string())?;
         let path = exe.display().to_string();
-        log::debug(&format!("autostart enable: {path}"));
+        log::debug(format!("autostart enable: {path}"));
         write_run_value(&path)
     } else {
         log::debug("autostart disable");
@@ -30,12 +30,12 @@ pub fn apply(enabled: bool) -> Result<(), String> {
 pub fn sync_from_config(enabled: bool) {
     let active = is_enabled();
     if active == enabled {
-        log::trace(&format!("autostart already synced (enabled={enabled})"));
+        log::trace(format!("autostart already synced (enabled={enabled})"));
         return;
     }
     match apply(enabled) {
-        Ok(()) => log::debug(&format!("autostart synced to {enabled}")),
-        Err(err) => log::warn(&format!("autostart sync failed: {err}")),
+        Ok(()) => log::debug(format!("autostart synced to {enabled}")),
+        Err(err) => log::warn(format!("autostart sync failed: {err}")),
     }
 }
 
@@ -88,7 +88,7 @@ fn write_run_value(path: &str) -> Result<(), String> {
         let key = open_run_key(KEY_SET_VALUE)?;
         let name = util::wide(VALUE_NAME);
         let data = util::wide(&quoted);
-        let byte_len = ((data.len() - 1) * 2) as u32;
+        let byte_len = (data.len() * 2) as u32;
         let status = RegSetValueExW(
             key,
             PCWSTR(name.as_ptr()),

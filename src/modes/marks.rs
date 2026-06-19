@@ -51,10 +51,7 @@ pub fn index_after_foreground(entries: &[MarkEntry]) -> usize {
                 .is_some_and(|w| w.hwnd == fg_win.hwnd)
         })
     });
-    match current_idx {
-        Some(idx) => (idx + 1) % entries.len(),
-        None => 0,
-    }
+    current_idx.unwrap_or_default()
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -67,7 +64,7 @@ impl MarksStore {
     pub fn load() -> Self {
         paths::ensure_app_data();
         let path = paths::marks_path();
-        log::debug(&format!("MarksStore::load from {}", path.display()));
+        log::debug(format!("MarksStore::load from {}", path.display()));
         if path.exists() {
             if let Ok(text) = fs::read_to_string(path) {
                 if let Ok(store) = toml::from_str(&text) {
@@ -85,36 +82,43 @@ impl MarksStore {
     }
 
     pub fn save(&self) -> std::io::Result<()> {
-        paths::ensure_app_data();
-        let path = paths::marks_path();
-        log::debug(&format!("MarksStore::save to {} ({} slots)", path.display(), self.slots.len()));
-        let text = toml::to_string_pretty(self).expect("serialize marks");
-        fs::write(path, text)
+        #[cfg(test)]
+        {
+            Ok(())
+        }
+        #[cfg(not(test))]
+        {
+            paths::ensure_app_data();
+            let path = paths::marks_path();
+            log::debug(format!("MarksStore::save to {} ({} slots)", path.display(), self.slots.len()));
+            let text = toml::to_string_pretty(self).expect("serialize marks");
+            fs::write(path, text)
+        }
     }
 
     pub fn mark_slot(&mut self, slot: u8) -> Option<WindowIdentity> {
-        log::debug(&format!("mark_slot {slot}"));
+        log::debug(format!("mark_slot {slot}"));
         let current = get_foreground_window()?;
         let identity = WindowIdentity::from_window(&current);
         self.slots.insert(slot.to_string(), identity.clone());
         let _ = self.save();
-        log::info(&format!("marked slot {slot}: {}", identity.display_label()));
+        log::info(format!("marked slot {slot}: {}", identity.display_label()));
         Some(identity)
     }
 
     pub fn jump_slot(&self, slot: u8) -> bool {
-        log::debug(&format!("jump_slot {slot}"));
+        log::debug(format!("jump_slot {slot}"));
         let Some(identity) = self.slots.get(&slot.to_string()) else {
-            log::warn(&format!("jump_slot {slot}: empty"));
+            log::warn(format!("jump_slot {slot}: empty"));
             return false;
         };
         let windows = enumerate_windows(None);
         let Some(target) = resolve_identity(identity, &windows) else {
-            log::warn(&format!("jump_slot {slot}: window not found for {}", identity.display_label()));
+            log::warn(format!("jump_slot {slot}: window not found for {}", identity.display_label()));
             return false;
         };
         let ok = focus::focus_window(target.hwnd);
-        log::debug(&format!("jump_slot {slot}: focus ok={ok}"));
+        log::debug(format!("jump_slot {slot}: focus ok={ok}"));
         ok
     }
 
@@ -148,16 +152,16 @@ impl MarksStore {
         if let Some(slot) = self.find_slot(&identity) {
             self.slots.remove(&slot.to_string());
             let _ = self.save();
-            log::info(&format!("unmarked slot {slot}: {app}"));
+            log::info(format!("unmarked slot {slot}: {app}"));
             return ToggleMarkResult::Unmarked { slot, app };
         }
 
         for slot in 1..=9 {
             let key = slot.to_string();
-            if !self.slots.contains_key(&key) {
-                self.slots.insert(key, identity);
+            if let std::collections::btree_map::Entry::Vacant(e) = self.slots.entry(key) {
+                e.insert(identity);
                 let _ = self.save();
-                log::info(&format!("marked slot {slot}: {app}"));
+                log::info(format!("marked slot {slot}: {app}"));
                 return ToggleMarkResult::Marked { slot, app };
             }
         }
@@ -225,7 +229,7 @@ impl MarksState {
     }
 
     pub fn cycle_mark(&mut self, forward: bool) -> bool {
-        log::debug(&format!("cycle_mark forward={forward}"));
+        log::debug(format!("cycle_mark forward={forward}"));
         let filled: Vec<u8> = (1..=9)
             .filter(|slot| self.store.slots.contains_key(&slot.to_string()))
             .collect();
@@ -241,7 +245,7 @@ impl MarksState {
             self.cycle_index -= 1;
         }
         let slot = filled[self.cycle_index];
-        log::debug(&format!("cycle_mark: slot {slot} (index {})", self.cycle_index));
+        log::debug(format!("cycle_mark: slot {slot} (index {})", self.cycle_index));
         self.store.jump_slot(slot)
     }
 }
@@ -251,4 +255,44 @@ pub type SharedMarks = Arc<Mutex<MarksState>>;
 pub fn shared_marks() -> SharedMarks {
     log::debug("shared_marks");
     Arc::new(Mutex::new(MarksState::new()))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    fn identity(label: &str) -> WindowIdentity {
+        WindowIdentity {
+            exe: PathBuf::from(format!("C:\\apps\\{label}.exe")),
+            title: label.into(),
+        }
+    }
+
+    #[test]
+    fn move_mark_slot_swaps_with_neighbor() {
+        let mut store = MarksStore::default();
+        store.slots.insert("1".into(), identity("a"));
+        store.slots.insert("3".into(), identity("b"));
+        store.slots.insert("5".into(), identity("c"));
+
+        assert!(store.move_mark_slot(3, true));
+        assert_eq!(store.slots.get("1").map(|i| i.title.as_str()), Some("b"));
+        assert_eq!(store.slots.get("3").map(|i| i.title.as_str()), Some("a"));
+
+        assert!(store.move_mark_slot(3, false));
+        assert_eq!(store.slots.get("3").map(|i| i.title.as_str()), Some("c"));
+        assert_eq!(store.slots.get("5").map(|i| i.title.as_str()), Some("a"));
+    }
+
+    #[test]
+    fn move_mark_slot_noop_at_edges() {
+        let mut store = MarksStore::default();
+        store.slots.insert("2".into(), identity("only"));
+
+        assert!(!store.move_mark_slot(2, true));
+        assert!(!store.move_mark_slot(2, false));
+        assert!(!store.move_mark_slot(9, true));
+    }
 }

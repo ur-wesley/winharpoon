@@ -16,19 +16,17 @@ pub struct Config {
     pub general: GeneralConfig,
     pub hotkeys: HotkeysConfig,
     pub launcher: LauncherConfig,
+    #[serde(default)]
+    pub apps: AppsConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct GeneralConfig {
     #[serde(default)]
     pub autostart: bool,
 }
 
-impl Default for GeneralConfig {
-    fn default() -> Self {
-        Self { autostart: false }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HotkeysConfig {
@@ -39,6 +37,10 @@ pub struct HotkeysConfig {
     pub mark_prev: String,
     #[serde(default = "default_marks_switcher")]
     pub marks_switcher: String,
+    #[serde(default = "default_marks_switcher_next")]
+    pub marks_switcher_next: String,
+    #[serde(default = "default_marks_switcher_prev")]
+    pub marks_switcher_prev: String,
     #[serde(default = "default_mark_toggle")]
     pub mark_toggle: String,
     #[serde(default)]
@@ -52,6 +54,55 @@ pub struct LauncherConfig {
     pub width: f32,
     pub height: f32,
     pub max_results: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppsConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_true")]
+    pub alt_double_click: bool,
+    #[serde(default = "default_apps_scope")]
+    pub alt_double_click_scope: String,
+    #[serde(default = "default_apps_width")]
+    pub width: f32,
+    #[serde(default = "default_apps_height")]
+    pub height: f32,
+    #[serde(default = "default_apps_max_results")]
+    pub max_results: usize,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_apps_scope() -> String {
+    "anywhere".into()
+}
+
+fn default_apps_width() -> f32 {
+    440.0
+}
+
+fn default_apps_height() -> f32 {
+    420.0
+}
+
+fn default_apps_max_results() -> usize {
+    16
+}
+
+impl Default for AppsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            alt_double_click: true,
+            alt_double_click_scope: default_apps_scope(),
+            width: default_apps_width(),
+            height: default_apps_height(),
+            max_results: default_apps_max_results(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -76,6 +127,14 @@ pub enum ConfigValidationError {
 
 fn default_marks_switcher() -> String {
     "Win+Alt+M".into()
+}
+
+fn default_marks_switcher_next() -> String {
+    "Win+Alt+Right".into()
+}
+
+fn default_marks_switcher_prev() -> String {
+    "Win+Alt+Left".into()
 }
 
 fn default_mark_toggle() -> String {
@@ -105,6 +164,8 @@ impl Default for Config {
                 mark_next: "Win+Alt+Period".into(),
                 mark_prev: "Win+Alt+Comma".into(),
                 marks_switcher: default_marks_switcher(),
+                marks_switcher_next: default_marks_switcher_next(),
+                marks_switcher_prev: default_marks_switcher_prev(),
                 mark_toggle: default_mark_toggle(),
                 mark,
                 jump,
@@ -114,6 +175,7 @@ impl Default for Config {
                 height: 360.0,
                 max_results: 12,
             },
+            apps: AppsConfig::default(),
         }
     }
 }
@@ -122,7 +184,7 @@ impl Config {
     pub fn load() -> Self {
         paths::ensure_app_data();
         let path = paths::config_path();
-        log::debug(&format!("Config::load from {}", path.display()));
+        log::debug(format!("Config::load from {}", path.display()));
         if path.exists() {
             match fs::read_to_string(&path) {
                 Ok(text) => match toml::from_str(&text) {
@@ -130,9 +192,9 @@ impl Config {
                         log::debug("config loaded from disk");
                         return cfg;
                     }
-                    Err(err) => log::error(&format!("config parse error: {err}")),
+                    Err(err) => log::error(format!("config parse error: {err}")),
                 },
-                Err(err) => log::error(&format!("config read error: {err}")),
+                Err(err) => log::error(format!("config read error: {err}")),
             }
         } else {
             log::debug("config file missing, creating defaults");
@@ -143,11 +205,18 @@ impl Config {
     }
 
     pub fn save(&self) -> std::io::Result<()> {
-        paths::ensure_app_data();
-        let path = paths::config_path();
-        log::debug(&format!("Config::save to {}", path.display()));
-        let text = toml::to_string_pretty(self).expect("serialize config");
-        fs::write(path, text)
+        #[cfg(test)]
+        {
+            Ok(())
+        }
+        #[cfg(not(test))]
+        {
+            paths::ensure_app_data();
+            let path = paths::config_path();
+            log::debug(format!("Config::save to {}", path.display()));
+            let text = toml::to_string_pretty(self).expect("serialize config");
+            fs::write(path, text)
+        }
     }
 
     pub fn bindings(&self) -> Vec<HotkeyBinding> {
@@ -166,6 +235,16 @@ impl Config {
             binding("mark_next", &self.hotkeys.mark_next, HotkeyAction::MarkNext),
             binding("mark_prev", &self.hotkeys.mark_prev, HotkeyAction::MarkPrev),
             binding("mark_toggle", &self.hotkeys.mark_toggle, HotkeyAction::ToggleMark),
+            binding(
+                "marks_switcher_next",
+                &self.hotkeys.marks_switcher_next,
+                HotkeyAction::MarksSwitcherNext,
+            ),
+            binding(
+                "marks_switcher_prev",
+                &self.hotkeys.marks_switcher_prev,
+                HotkeyAction::MarksSwitcherPrev,
+            ),
         ];
         for slot in 1..=9 {
             let key = slot.to_string();
@@ -188,50 +267,20 @@ impl Config {
     }
 
     pub fn validate(&self) -> Result<Vec<HotkeyBinding>, Vec<ConfigValidationError>> {
-        let bindings = self.bindings();
-        log::debug(&format!("Config::validate {} bindings", bindings.len()));
-        let mut errors = Vec::new();
-        let mut seen: HashMap<ParsedHotkey, String> = HashMap::new();
+        validate_bindings(&self.bindings())
+    }
 
-        for b in &bindings {
-            let Some(parsed) = &b.parsed else {
-                if !b.chord.trim().is_empty() {
-                    errors.push(ConfigValidationError::InvalidChord {
-                        label: b.label.clone(),
-                        chord: b.chord.clone(),
-                        reason: "could not parse chord".into(),
-                    });
-                }
-                continue;
-            };
-            if let Some(first) = seen.get(parsed) {
-                errors.push(ConfigValidationError::DuplicateBinding {
-                    chord: b.chord.clone(),
-                    first: first.clone(),
-                    second: b.label.clone(),
-                });
-            } else {
-                seen.insert(parsed.clone(), b.label.clone());
-            }
-            if is_windows_reserved(&b.chord) {
-                log::warn(&format!(
-                    "warning: {} uses a Windows-reserved chord {}",
-                    b.label, b.chord
-                ));
-            }
-        }
-
-        if errors.is_empty() {
-            log::debug("config validation ok");
-            Ok(bindings)
-        } else {
-            log::warn(&format!("config validation: {} errors", errors.len()));
-            Err(errors)
-        }
+    pub fn validate_merged(
+        &self,
+        extra: &[HotkeyBinding],
+    ) -> Result<Vec<HotkeyBinding>, Vec<ConfigValidationError>> {
+        let mut bindings = self.bindings();
+        bindings.extend(extra.iter().cloned());
+        validate_bindings(&bindings)
     }
 
     pub fn set_binding_chord(&mut self, label: &str, chord: String) {
-        log::debug(&format!("set_binding_chord {label} -> {chord}"));
+        log::debug(format!("set_binding_chord {label} -> {chord}"));
         match label {
             "launcher" => self.hotkeys.launcher = chord,
             "same_app_next" => self.hotkeys.same_app_next = chord,
@@ -239,6 +288,8 @@ impl Config {
             "mark_next" => self.hotkeys.mark_next = chord,
             "mark_prev" => self.hotkeys.mark_prev = chord,
             "marks_switcher" => self.hotkeys.marks_switcher = chord,
+            "marks_switcher_next" => self.hotkeys.marks_switcher_next = chord,
+            "marks_switcher_prev" => self.hotkeys.marks_switcher_prev = chord,
             "mark_toggle" => self.hotkeys.mark_toggle = chord,
             _ if label.starts_with("mark_") => {
                 if let Some(slot) = label.strip_prefix("mark_") {
@@ -259,9 +310,53 @@ impl Config {
                 }
             }
             _ => {
-                log::debug(&format!("set_binding_chord: unknown label {label}"));
+                log::debug(format!("set_binding_chord: unknown label {label}"));
             }
         }
+    }
+}
+
+fn validate_bindings(
+    bindings: &[HotkeyBinding],
+) -> Result<Vec<HotkeyBinding>, Vec<ConfigValidationError>> {
+    log::debug(format!("validate_bindings {} bindings", bindings.len()));
+    let mut errors = Vec::new();
+    let mut seen: HashMap<ParsedHotkey, String> = HashMap::new();
+
+    for b in bindings {
+        let Some(parsed) = &b.parsed else {
+            if !b.chord.trim().is_empty() {
+                errors.push(ConfigValidationError::InvalidChord {
+                    label: b.label.clone(),
+                    chord: b.chord.clone(),
+                    reason: "could not parse chord".into(),
+                });
+            }
+            continue;
+        };
+        if let Some(first) = seen.get(parsed) {
+            errors.push(ConfigValidationError::DuplicateBinding {
+                chord: b.chord.clone(),
+                first: first.clone(),
+                second: b.label.clone(),
+            });
+        } else {
+            seen.insert(parsed.clone(), b.label.clone());
+        }
+        if is_windows_reserved(&b.chord) {
+            log::warn(format!(
+                "warning: {} uses a Windows-reserved chord {}",
+                b.label, b.chord
+            ));
+        }
+    }
+
+    if errors.is_empty() {
+        log::debug("binding validation ok");
+        Ok(bindings.to_vec())
+    } else {
+        log::warn(format!("binding validation: {} errors", errors.len()));
+        Err(errors)
     }
 }
 
@@ -273,7 +368,7 @@ fn binding(label: &str, chord: &str, action: HotkeyAction) -> HotkeyBinding {
         match parse_chord(trimmed) {
             Ok(p) => Some(p),
             Err(e) => {
-                log::debug(&format!("binding {label}: parse error for {trimmed}: {e}"));
+                log::debug(format!("binding {label}: parse error for {trimmed}: {e}"));
                 None
             }
         }
@@ -287,7 +382,7 @@ fn binding(label: &str, chord: &str, action: HotkeyAction) -> HotkeyBinding {
 }
 
 pub fn parse_chord(input: &str) -> Result<ParsedHotkey, String> {
-    log::trace(&format!("parse_chord: {input}"));
+    log::trace(format!("parse_chord: {input}"));
     let mut modifiers = MOD_NOREPEAT;
     let mut vk: Option<u16> = None;
 
@@ -312,7 +407,7 @@ pub fn parse_chord(input: &str) -> Result<ParsedHotkey, String> {
         modifiers: modifiers.0,
         vk,
     };
-    log::trace(&format!(
+    log::trace(format!(
         "parse_chord ok: {input} -> mods=0x{:X} vk=0x{:X}",
         parsed.modifiers, parsed.vk
     ));
@@ -432,7 +527,7 @@ fn is_windows_reserved(chord: &str) -> bool {
 }
 
 pub fn chord_from_vk_mods(vk: VIRTUAL_KEY, mods: u32) -> String {
-    let key = format_vk(vk.0 as u16);
+    let key = format_vk(vk.0);
     let prefix = format_modifiers(mods);
     if prefix.is_empty() {
         key
@@ -449,7 +544,7 @@ mod tests {
     fn default_bindings_are_unique_and_parseable() {
         let cfg = Config::default();
         let bindings = cfg.validate().expect("default hotkeys must not collide");
-        assert_eq!(bindings.len(), 24);
+        assert_eq!(bindings.len(), 26);
         assert!(bindings.iter().all(|b| b.parsed.is_some()));
     }
 }

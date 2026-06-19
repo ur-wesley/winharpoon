@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use windows::Win32::Foundation::{HINSTANCE, LPARAM, LRESULT, WPARAM};
@@ -24,8 +23,8 @@ use crate::modes::marks::{index_after_foreground, switcher_entries, SharedMarks}
 use crate::window::focus;
 
 const LLKHF_UP: u32 = 0x80;
+const LLKHF_INJECTED: u32 = 0x10;
 const POLL_MS: u32 = 40;
-const CONFIRM_GRACE: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Clone)]
 struct JumpBinding {
@@ -42,15 +41,32 @@ struct TrackedModifiers {
     win: bool,
 }
 
+#[derive(Debug, Clone)]
+struct SwitcherNavBinding {
+    modifiers: u32,
+    vk: u16,
+    delta: i32,
+}
+
+#[derive(Debug, Clone)]
+struct LauncherBinding {
+    modifiers: u32,
+    vk: u16,
+}
+
 struct HookState {
     chord: HoldChord,
     marks: SharedMarks,
     jump_bindings: Vec<JumpBinding>,
+    switcher_nav_bindings: Vec<SwitcherNavBinding>,
+    launcher_binding: Option<LauncherBinding>,
     jump_keys_down: HashSet<u32>,
+    switcher_nav_keys_down: HashSet<u32>,
     mods: TrackedModifiers,
     active: bool,
     ignore_trigger_down: bool,
-    activated_at: Option<Instant>,
+    trigger_released_since_activate: bool,
+    last_trigger_down: bool,
     entries: Vec<crate::modes::marks::MarkEntry>,
     selected: usize,
 }
@@ -72,13 +88,36 @@ fn jump_bindings_from_config(config: &Config) -> Vec<JumpBinding> {
             continue;
         }
         let Ok(parsed) = parse_chord(trimmed) else {
-            log::warn(&format!("jump_{slot} chord parse failed: {trimmed}"));
+            log::warn(format!("jump_{slot} chord parse failed: {trimmed}"));
             continue;
         };
         out.push(JumpBinding {
             modifiers: parsed.modifiers & !MOD_NOREPEAT.0,
             vk: parsed.vk,
             slot,
+        });
+    }
+    out
+}
+
+fn switcher_nav_bindings_from_config(config: &Config) -> Vec<SwitcherNavBinding> {
+    let mut out = Vec::new();
+    for (chord, delta) in [
+        (&config.hotkeys.marks_switcher_next, 1),
+        (&config.hotkeys.marks_switcher_prev, -1),
+    ] {
+        let trimmed = chord.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Ok(parsed) = parse_chord(trimmed) else {
+            log::warn(format!("marks_switcher nav chord parse failed: {trimmed}"));
+            continue;
+        };
+        out.push(SwitcherNavBinding {
+            modifiers: parsed.modifiers & !MOD_NOREPEAT.0,
+            vk: parsed.vk,
+            delta,
         });
     }
     out
@@ -101,11 +140,18 @@ pub fn install(marks: SharedMarks, config: Arc<Mutex<Config>>) {
 pub fn init_state(marks: SharedMarks, config: Arc<Mutex<Config>>) {
     let config_guard = config.lock();
     let chord = parse_hold_chord(&config_guard.hotkeys.marks_switcher)
-        .unwrap_or_else(|_| HoldChord {
+        .unwrap_or(HoldChord {
             hold_modifiers: MOD_WIN.0 | MOD_ALT.0,
             trigger_vk: 0x4D,
         });
     let jump_bindings = jump_bindings_from_config(&config_guard);
+    let switcher_nav_bindings = switcher_nav_bindings_from_config(&config_guard);
+    let launcher_binding = parse_chord(&config_guard.hotkeys.launcher)
+        .ok()
+        .map(|parsed| LauncherBinding {
+            modifiers: parsed.modifiers & !MOD_NOREPEAT.0,
+            vk: parsed.vk,
+        });
     drop(config_guard);
     {
         let mut guard = HOOK_STATE.lock();
@@ -114,11 +160,15 @@ pub fn init_state(marks: SharedMarks, config: Arc<Mutex<Config>>) {
             chord,
             marks,
             jump_bindings,
+            switcher_nav_bindings,
+            launcher_binding,
             jump_keys_down: HashSet::new(),
+            switcher_nav_keys_down: HashSet::new(),
             mods: TrackedModifiers::default(),
             active: false,
             ignore_trigger_down: false,
-            activated_at: None,
+            trigger_released_since_activate: false,
+            last_trigger_down: false,
             entries: Vec::new(),
             selected: 0,
         });
@@ -131,6 +181,13 @@ pub fn ensure_installed() {
 
 pub fn reload_chord(config: &Config) {
     let jump_bindings = jump_bindings_from_config(config);
+    let switcher_nav_bindings = switcher_nav_bindings_from_config(config);
+    let launcher_binding = parse_chord(&config.hotkeys.launcher)
+        .ok()
+        .map(|parsed| LauncherBinding {
+            modifiers: parsed.modifiers & !MOD_NOREPEAT.0,
+            vk: parsed.vk,
+        });
     let mut guard = HOOK_STATE.lock();
     let Some(state) = guard.as_mut() else {
         return;
@@ -145,6 +202,8 @@ pub fn reload_chord(config: &Config) {
         log::warn("marks_switcher chord parse failed on reload");
     }
     state.jump_bindings = jump_bindings;
+    state.switcher_nav_bindings = switcher_nav_bindings;
+    state.launcher_binding = launcher_binding;
     log::debug("marks_switcher hook config reloaded");
 }
 
@@ -157,9 +216,9 @@ pub fn dispatch_jump(slot: u8) {
         state.marks.clone()
     };
     if marks.lock().store.jump_slot(slot) {
-        log::debug(&format!("hook jump slot {slot}: ok"));
+        log::debug(format!("hook jump slot {slot}: ok"));
     } else {
-        log::warn(&format!("hook jump slot {slot}: missed"));
+        log::warn(format!("hook jump slot {slot}: missed"));
     }
 }
 
@@ -175,7 +234,7 @@ fn install_hook() {
                 HOOK_HANDLE.store(h.0, Ordering::SeqCst);
                 log::debug("marks_switcher WH_KEYBOARD_LL installed");
             }
-            Err(err) => log::error(&format!("marks_switcher hook install failed: {err:?}")),
+            Err(err) => log::error(format!("marks_switcher hook install failed: {err:?}")),
         }
     }
 }
@@ -194,6 +253,7 @@ pub fn cancel_if_active() {
 }
 
 pub fn dispatch_key(vk: u32, key_up: bool) {
+    log::debug(format!("marks_switcher dispatch_key vk=0x{vk:X} key_up={key_up}"));
     if key_up {
         let confirm = {
             let mut guard = HOOK_STATE.lock();
@@ -203,9 +263,12 @@ pub fn dispatch_key(vk: u32, key_up: bool) {
             let chord = state.chord.clone();
             if vk == chord.trigger_vk as u32 {
                 state.ignore_trigger_down = false;
+                if state.active {
+                    state.trigger_released_since_activate = true;
+                }
             }
-            if state.active && is_hold_modifier_vk(vk, chord.hold_modifiers) && may_confirm(state) {
-                log::debug(&format!("marks_switcher modifier up vk=0x{vk:X}"));
+            if should_confirm_release(state, &chord) {
+                log::debug(format!("marks_switcher confirm on key up vk=0x{vk:X}"));
                 let selected = state.selected;
                 let entries = state.entries.clone();
                 cancel_active(state);
@@ -226,22 +289,16 @@ pub fn dispatch_key(vk: u32, key_up: bool) {
     };
     let chord = state.chord.clone();
 
-    if vk == chord.trigger_vk as u32 && should_handle_trigger(&chord) {
+    if vk == chord.trigger_vk as u32 && should_handle_trigger(state, &chord) {
         if state.ignore_trigger_down && trigger_physically_down(&chord) {
             log::debug("marks_switcher: trigger held from prior session, release first");
             return;
         }
         state.ignore_trigger_down = false;
-        let backward = unsafe { shift_held() };
-        if backward {
-            if state.active {
-                cycle(state, -1);
-            } else {
-                activate(state);
-                cycle(state, -1);
-            }
-        } else if state.active {
-            cycle(state, 1);
+        let shift_in_hold = (chord.hold_modifiers & MOD_SHIFT.0) != 0;
+        let backward = !shift_in_hold && state.mods.shift;
+        if state.active {
+            cycle(state, if backward { -1 } else { 1 });
         } else {
             activate(state);
         }
@@ -257,8 +314,27 @@ pub fn poll_active() {
         let Some(state) = guard.as_mut() else {
             return;
         };
-        if state.active && !hold_mods_match(&state.chord) && may_confirm(state) {
-            log::debug("marks_switcher poll: hold modifiers released");
+        if state.active {
+            sync_tracked_modifiers(&mut state.mods);
+            let trig_down = trigger_physically_down(&state.chord);
+            if trig_down {
+                if !state.last_trigger_down {
+                    log::debug("marks_switcher poll: trigger key pressed (cycle)");
+                    let shift_in_hold = (state.chord.hold_modifiers & MOD_SHIFT.0) != 0;
+                    let backward = !shift_in_hold && state.mods.shift;
+                    cycle(state, if backward { -1 } else { 1 });
+                    state.last_trigger_down = true;
+                }
+            } else {
+                if state.last_trigger_down {
+                    log::debug("marks_switcher poll: trigger key released");
+                    state.last_trigger_down = false;
+                    state.trigger_released_since_activate = true;
+                }
+            }
+        }
+        if should_confirm_release(state, &state.chord) {
+            log::debug("marks_switcher poll: chord released");
             let selected = state.selected;
             let entries = state.entries.clone();
             cancel_active(state);
@@ -308,7 +384,10 @@ fn cancel_active(state: &mut HookState) {
     log::debug("marks_switcher cancel_active");
     state.active = false;
     state.ignore_trigger_down = trigger_physically_down(&state.chord);
-    state.activated_at = None;
+    state.trigger_released_since_activate = false;
+    state.last_trigger_down = false;
+    state.jump_keys_down.clear();
+    state.switcher_nav_keys_down.clear();
     state.entries.clear();
     set_switcher_active(false);
     stop_poll_timer();
@@ -331,7 +410,7 @@ fn focus_selected(entries: &[crate::modes::marks::MarkEntry], selected: usize) {
             focus::focus_window(target.hwnd);
         }
     } else {
-        log::warn(&format!(
+        log::warn(format!(
             "marks_switcher confirm: window not found for {}",
             entry.identity.display_label()
         ));
@@ -371,7 +450,8 @@ fn activate(state: &mut HookState) {
     state.selected = selected;
     state.active = true;
     state.ignore_trigger_down = false;
-    state.activated_at = Some(Instant::now());
+    state.trigger_released_since_activate = false;
+    state.last_trigger_down = true;
     set_switcher_active(true);
     start_poll_timer();
     send_ui(SwitcherUiCommand::Show {
@@ -395,10 +475,26 @@ fn cycle(state: &mut HookState, delta: i32) {
     send_ui(SwitcherUiCommand::SetSelected(state.selected));
 }
 
-fn may_confirm(state: &HookState) -> bool {
-    state
-        .activated_at
-        .is_none_or(|t| t.elapsed() >= CONFIRM_GRACE)
+fn should_confirm_release(state: &HookState, chord: &HoldChord) -> bool {
+    let mods_match = hold_mods_match(chord);
+    let trig_down = trigger_physically_down(chord);
+    log::debug(format!(
+        "should_confirm_release: active={}, trigger_released={}, mods_match={}, trig_down={}",
+        state.active, state.trigger_released_since_activate, mods_match, trig_down
+    ));
+    if !state.active {
+        return false;
+    }
+    if !mods_match && !trig_down {
+        return true;
+    }
+    if !state.trigger_released_since_activate {
+        return false;
+    }
+    if mods_match || trig_down {
+        return false;
+    }
+    true
 }
 
 fn trigger_physically_down(chord: &HoldChord) -> bool {
@@ -549,21 +645,55 @@ fn post_jump(slot: u8) {
     }
 }
 
-fn handle_jump_key(vk: u32, key_up: bool) {
-    let mut guard = HOOK_STATE.lock();
-    let Some(state) = guard.as_mut() else {
-        return;
-    };
-    if key_up {
-        state.jump_keys_down.remove(&vk);
+fn handle_switcher_nav_key(state: &mut HookState, vk: u32, key_up: bool) {
+    if !is_switcher_active() {
         return;
     }
-    if !is_jump_vk(state, vk) {
+    if key_up {
+        state.switcher_nav_keys_down.remove(&vk);
+        return;
+    }
+    if !state.switcher_nav_bindings.iter().any(|b| b.vk as u32 == vk) {
         return;
     }
     sync_tracked_modifiers(&mut state.mods);
-    if state.jump_keys_down.contains(&vk) {
+    if state.switcher_nav_keys_down.contains(&vk) {
         return;
+    }
+    let delta = state.switcher_nav_bindings.iter().find_map(|binding| {
+        if binding.vk as u32 != vk {
+            return None;
+        }
+        let mods = binding.modifiers;
+        if (tracked_mods_match(&state.mods, mods) && !tracked_extra_mods(&state.mods, mods))
+            || (hold_mods_match_modifiers(mods) && !extra_mods_pressed_for(mods))
+        {
+            Some(binding.delta)
+        } else {
+            None
+        }
+    });
+    if let Some(delta) = delta {
+        state.switcher_nav_keys_down.insert(vk);
+        log::debug(format!(
+            "marks_switcher nav vk=0x{vk:X} delta={delta} mods={:?}",
+            state.mods
+        ));
+        cycle(state, delta);
+    }
+}
+
+fn handle_jump_key(state: &mut HookState, vk: u32, key_up: bool) -> Option<u8> {
+    if key_up {
+        state.jump_keys_down.remove(&vk);
+        return None;
+    }
+    if !is_jump_vk(state, vk) {
+        return None;
+    }
+    sync_tracked_modifiers(&mut state.mods);
+    if state.jump_keys_down.contains(&vk) {
+        return None;
     }
     let slot = state.jump_bindings.iter().find_map(|binding| {
         if binding.vk as u32 != vk {
@@ -580,12 +710,52 @@ fn handle_jump_key(vk: u32, key_up: bool) {
     });
     if let Some(slot) = slot {
         state.jump_keys_down.insert(vk);
-        log::debug(&format!(
+        log::debug(format!(
             "marks_switcher hook jump vk=0x{vk:X} slot={slot} mods={:?}",
             state.mods
         ));
-        drop(guard);
-        post_jump(slot);
+        Some(slot)
+    } else {
+        None
+    }
+}
+
+fn handle_launcher_key(state: &mut HookState, vk: u32, key_up: bool) -> bool {
+    if key_up {
+        return false;
+    }
+    let Some(binding) = &state.launcher_binding else {
+        return false;
+    };
+    if binding.vk as u32 != vk {
+        return false;
+    }
+    sync_tracked_modifiers(&mut state.mods);
+    let mods = binding.modifiers;
+    if (tracked_mods_match(&state.mods, mods) && !tracked_extra_mods(&state.mods, mods))
+        || (hold_mods_match_modifiers(mods) && !extra_mods_pressed_for(mods))
+    {
+        log::debug(format!(
+            "marks_switcher hook launcher vk=0x{vk:X} mods={:?}",
+            state.mods
+        ));
+        true
+    } else {
+        false
+    }
+}
+
+fn post_launcher() {
+    let Some(hwnd) = hotkey_hwnd() else {
+        return;
+    };
+    unsafe {
+        let _ = PostMessageW(
+            Some(hwnd),
+            crate::hotkeys::WM_LAUNCHER_KEY,
+            WPARAM(0),
+            LPARAM(0),
+        );
     }
 }
 
@@ -599,29 +769,88 @@ fn is_hold_modifier_vk(vk: u32, hold_modifiers: u32) -> bool {
     if (hold_modifiers & MOD_SHIFT.0) != 0 && matches!(vk, 0x10 | 0xA0 | 0xA1) {
         return true;
     }
+    if (hold_modifiers & MOD_CONTROL.0) != 0 && matches!(vk, 0x11 | 0xA2 | 0xA3) {
+        return true;
+    }
     false
 }
 
-unsafe fn shift_held() -> bool {
-    GetAsyncKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000 != 0
+fn should_handle_trigger(state: &HookState, chord: &HoldChord) -> bool {
+    (tracked_mods_match(&state.mods, chord.hold_modifiers) && !tracked_extra_mods(&state.mods, chord.hold_modifiers))
+        || (hold_mods_match(chord) && !extra_mods_pressed(chord))
 }
 
-fn should_handle_trigger(chord: &HoldChord) -> bool {
-    hold_mods_match(chord) && !extra_mods_pressed(chord)
+fn should_swallow_key(state: &HookState, vk: u32, _key_up: bool) -> bool {
+    let trigger_vk = TRIGGER_VK.load(Ordering::Relaxed);
+    if vk == VK_ESCAPE.0 as u32 {
+        return is_switcher_active();
+    }
+    if vk == trigger_vk {
+        if is_switcher_active() {
+            return true;
+        }
+        if should_handle_trigger(state, &state.chord) {
+            return true;
+        }
+    }
+    if let Some(binding) = &state.launcher_binding {
+        if binding.vk as u32 == vk {
+            let mods = binding.modifiers;
+            if (tracked_mods_match(&state.mods, mods) && !tracked_extra_mods(&state.mods, mods))
+                || (hold_mods_match_modifiers(mods) && !extra_mods_pressed_for(mods))
+            {
+                return true;
+            }
+        }
+    }
+    if is_switcher_active() {
+        if is_jump_vk(state, vk) {
+            return true;
+        }
+        if state.switcher_nav_bindings.iter().any(|b| b.vk as u32 == vk) {
+            return true;
+        }
+    }
+    false
 }
 
 unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    let mut swallow = false;
     if code >= 0 {
         let kbd = *(lparam.0 as *const KBDLLHOOKSTRUCT);
         let vk = kbd.vkCode;
         let key_up = (kbd.flags.0 & LLKHF_UP) != 0;
+        if vk == 0x59 || vk == 0x11 || vk == 0x10 || vk == 0xA2 || vk == 0xA0 {
+            log::trace(format!("keyboard_proc: vk=0x{vk:X} key_up={key_up}"));
+        }
+        let injected = (kbd.flags.0 & LLKHF_INJECTED) != 0;
+        
+        let mut jump_slot = None;
+        let mut trigger_launcher = false;
+
         {
             let mut guard = HOOK_STATE.lock();
             if let Some(state) = guard.as_mut() {
                 update_tracked_modifiers(&mut state.mods, vk, key_up);
+                jump_slot = handle_jump_key(state, vk, key_up);
+                trigger_launcher = handle_launcher_key(state, vk, key_up);
+                handle_switcher_nav_key(state, vk, key_up);
+                
+                if !key_up && !injected {
+                    crate::apps::hook::try_alt_double_tap(vk);
+                }
+                
+                swallow = should_swallow_key(state, vk, key_up);
             }
         }
-        handle_jump_key(vk, key_up);
+
+        if let Some(slot) = jump_slot {
+            post_jump(slot);
+        }
+        if trigger_launcher {
+            post_launcher();
+        }
+
         if should_forward_key(vk, key_up) {
             if let Some(hwnd) = hotkey_hwnd() {
                 let _ = PostMessageW(
@@ -634,20 +863,27 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
         }
     }
 
-    CallNextHookEx(Some(HHOOK(HOOK_HANDLE.load(Ordering::SeqCst))), code, wparam, lparam)
+    if swallow {
+        LRESULT(1)
+    } else {
+        CallNextHookEx(Some(HHOOK(HOOK_HANDLE.load(Ordering::SeqCst))), code, wparam, lparam)
+    }
 }
 
 fn should_forward_key(vk: u32, key_up: bool) -> bool {
     let trigger_vk = TRIGGER_VK.load(Ordering::Relaxed);
     let hold_mods = HOLD_MODS.load(Ordering::Relaxed);
-    if vk == VK_ESCAPE.0 as u32 {
-        return is_switcher_active();
+    let res = if vk == VK_ESCAPE.0 as u32 {
+        is_switcher_active()
+    } else if vk == trigger_vk {
+        true
+    } else if is_hold_modifier_vk(vk, hold_mods) {
+        is_switcher_active() || !key_up
+    } else {
+        false
+    };
+    if vk == 0x59 || vk == 0x11 || vk == 0x10 || vk == 0xA2 || vk == 0xA0 {
+        log::trace(format!("should_forward_key: vk=0x{vk:X} key_up={key_up} trigger_vk=0x{trigger_vk:X} res={res}"));
     }
-    if vk == trigger_vk {
-        return true;
-    }
-    if is_hold_modifier_vk(vk, hold_mods) {
-        return is_switcher_active() || !key_up;
-    }
-    false
+    res
 }

@@ -9,6 +9,8 @@ license = "MIT"
 directories = "6"
 eframe = { version = "0.34", default-features = false, features = ["default_fonts", "glow"] }
 egui = "0.34"
+egui_material_icons = { version = "0.6", features = ["outline"] }
+image = { version = "0.25", default-features = false, features = ["ico"] }
 nucleo-matcher = "0.3"
 parking_lot = "0.12"
 serde = { version = "1", features = ["derive"] }
@@ -26,12 +28,17 @@ windows = { version = "0.62", features = [
     "Win32_System_Threading",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_Storage_FileSystem",
+    "Win32_System_Com",
     "Win32_System_Registry",
     "Win32_UI_Shell",
     "Win32_UI_Controls",
     "Win32_UI_WindowsAndMessaging",
 ] }
 winrt-toast-reborn = "0.3.8"
+
+[build-dependencies]
+image = { version = "0.25", default-features = false, features = ["ico"] }
+winres = "0.1"
 
 [profile.release]
 lto = true

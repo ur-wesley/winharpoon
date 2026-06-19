@@ -66,7 +66,6 @@ pub fn preview_window(hwnd_raw: isize) {
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
         );
     }
-    focus_window_impl(hwnd_raw, false);
 }
 
 pub fn focus_window(hwnd_raw: isize) -> bool {
@@ -118,7 +117,7 @@ fn alt_physically_held() -> bool {
 
 fn focus_window_impl(hwnd_raw: isize, log_result: bool) -> bool {
     if log_result {
-        log::debug(&format!("focus_window hwnd={hwnd_raw}"));
+        log::debug(format!("focus_window hwnd={hwnd_raw}"));
     }
     let hwnd = HWND(hwnd_raw as *mut _);
     if hwnd.0.is_null() {
@@ -127,7 +126,7 @@ fn focus_window_impl(hwnd_raw: isize, log_result: bool) -> bool {
     }
     unsafe {
         if IsIconic(hwnd).as_bool() {
-            log::debug(&format!("focus_window: restoring minimized hwnd={hwnd_raw}"));
+            log::debug(format!("focus_window: restoring minimized hwnd={hwnd_raw}"));
             let _ = ShowWindow(hwnd, SW_RESTORE);
         }
 
@@ -149,7 +148,7 @@ fn focus_window_impl(hwnd_raw: isize, log_result: bool) -> bool {
 
         let ok = SetForegroundWindow(hwnd).as_bool() || BringWindowToTop(hwnd).is_ok();
         if log_result {
-            log::debug(&format!("focus_window hwnd={hwnd_raw} ok={ok}"));
+            log::debug(format!("focus_window hwnd={hwnd_raw} ok={ok}"));
         }
 
         if attached_target {
