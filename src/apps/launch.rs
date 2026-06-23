@@ -1,7 +1,10 @@
 use std::path::Path;
 
-use windows::core::{PCWSTR, PWSTR};
+use windows::core::PCWSTR;
 use windows::Win32::Foundation::CloseHandle;
+use windows::Win32::System::Com::{
+    CoCreateInstance, CLSCTX_INPROC_SERVER,
+};
 use windows::Win32::System::Threading::{
     CreateProcessW, CREATE_BREAKAWAY_FROM_JOB, CREATE_UNICODE_ENVIRONMENT, PROCESS_CREATION_FLAGS,
     PROCESS_INFORMATION, STARTUPINFOW,
@@ -15,6 +18,14 @@ use crate::util;
 use super::AppEntry;
 
 pub fn launch(entry: &AppEntry) -> bool {
+    if let Some(aumid) = &entry.aumid {
+        if launch_aumid(aumid, &entry.args) {
+            return true;
+        }
+        log::debug(format!(
+            "apps: AUMID launch failed for {aumid}, falling back"
+        ));
+    }
     if entry.source_lnk.is_file() {
         shell_open(&entry.source_lnk)
     } else {
@@ -53,6 +64,9 @@ fn shell_open(path: &Path) -> bool {
 }
 
 fn launch_detached(target: &Path, args: &str) -> bool {
+    if target.as_os_str().is_empty() {
+        return false;
+    }
     let mut command = format!("\"{}\"", target.display());
     let trimmed = args.trim();
     if !trimmed.is_empty() {
@@ -75,7 +89,7 @@ fn launch_detached(target: &Path, args: &str) -> bool {
             PROCESS_CREATION_FLAGS(CREATE_BREAKAWAY_FROM_JOB.0 | CREATE_UNICODE_ENVIRONMENT.0);
         let result = CreateProcessW(
             None,
-            Some(PWSTR(command_wide.as_mut_ptr())),
+            Some(windows::core::PWSTR(command_wide.as_mut_ptr())),
             None,
             None,
             false,
@@ -98,5 +112,39 @@ fn launch_detached(target: &Path, args: &str) -> bool {
             log::warn(format!("apps: detached launch failed {}", target.display()));
             false
         }
+    }
+}
+
+fn launch_aumid(aumid: &str, args: &str) -> bool {
+    use windows::Win32::UI::Shell::IApplicationActivationManager;
+
+    let activator: IApplicationActivationManager = unsafe {
+        match CoCreateInstance(
+            &windows::Win32::UI::Shell::ApplicationActivationManager,
+            None,
+            CLSCTX_INPROC_SERVER,
+        ) {
+            Ok(a) => a,
+            Err(e) => {
+                log::debug(format!("apps: AUMID activator CoCreate failed {e:?}"));
+                return false;
+            }
+        }
+    };
+
+    let aumid_wide = util::wide(aumid);
+    let args_wide = util::wide(args);
+    unsafe {
+        let hr = activator.ActivateApplication(
+            PCWSTR(aumid_wide.as_ptr()),
+            PCWSTR(args_wide.as_ptr()),
+            windows::Win32::UI::Shell::ACTIVATEOPTIONS(0),
+        );
+        if let Err(e) = hr {
+            log::debug(format!("apps: ActivateApplication failed {e:?} for {aumid}"));
+            return false;
+        }
+        log::debug(format!("apps: activated AUMID {aumid}"));
+        true
     }
 }
