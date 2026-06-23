@@ -117,6 +117,19 @@ pub fn render_tray_menu(
         {
             action = Some(TrayAction::Reload);
         }
+        if menu_row(
+            ui,
+            &MenuRowProps {
+                label: "Rescan apps",
+                icon: Some(TrayIconKind::Reload),
+                accent: None,
+                height: ROW_HEIGHT,
+            },
+        )
+        .clicked()
+        {
+            action = Some(TrayAction::RescanApps);
+        }
 
         native_ui::tray_menu_divider(ui);
 

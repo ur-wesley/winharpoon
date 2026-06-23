@@ -5,6 +5,7 @@ pub enum TrayAction {
     Settings,
     ConfigFolder,
     Reload,
+    RescanApps,
     Quit,
     JumpSlot(u8),
 }
@@ -44,6 +45,7 @@ impl TrayMenuController {
         const FRAME_PADDING_V: f32 = 12.0;
         const SLOT_ROWS: f32 = 9.0;
         const DIVIDER_COUNT: f32 = 5.0;
+        const ROW_COUNT: f32 = 5.0;
 
         FRAME_PADDING_V
             + HEADER_HEIGHT
@@ -51,8 +53,7 @@ impl TrayMenuController {
             + ROW_HEIGHT
             + SECTION_LABEL_HEIGHT
             + SLOT_ROWS * SLOT_ROW_HEIGHT
-            + ROW_HEIGHT * 2.0
-            + ROW_HEIGHT
+            + ROW_COUNT * ROW_HEIGHT
     }
 
     pub fn menu_screen_rect(

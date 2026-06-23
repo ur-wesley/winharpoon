@@ -100,6 +100,7 @@ impl TrayMenuPanel {
                 TrayAction::Settings => crate::launcher::open_settings(),
                 TrayAction::ConfigFolder => paths::open_config_folder(),
                 TrayAction::Reload => crate::hotkeys::post_reload(),
+                TrayAction::RescanApps => crate::apps::refresh_async(),
                 TrayAction::Quit => post_quit(),
                 TrayAction::JumpSlot(slot) => {
                     let state_guard = state.lock();
