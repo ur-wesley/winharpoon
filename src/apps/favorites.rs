@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{parse_chord, HotkeyBinding};
 use crate::hotkeys::HotkeyAction;
+use crate::log;
 use crate::paths;
 
 use super::AppEntry;
@@ -15,6 +16,8 @@ pub struct FavoriteEntry {
     pub id: String,
     #[serde(default)]
     pub hotkey: String,
+    #[serde(default)]
+    pub target: String,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -55,7 +58,7 @@ impl FavoritesStore {
         }
     }
 
-    pub fn toggle(&mut self, id: &str) -> bool {
+    pub fn toggle(&mut self, id: &str, target: &str) -> bool {
         if let Some(idx) = self.favorites.iter().position(|f| f.id == id) {
             self.favorites.remove(idx);
             let _ = self.save();
@@ -64,6 +67,7 @@ impl FavoritesStore {
             self.favorites.push(FavoriteEntry {
                 id: id.to_string(),
                 hotkey: String::new(),
+                target: target.to_string(),
             });
             let _ = self.save();
             true
@@ -77,6 +81,36 @@ impl FavoritesStore {
         entry.hotkey = hotkey;
         let _ = self.save();
         true
+    }
+
+    pub fn remap_to(&mut self, entries: &[AppEntry]) {
+        if self.favorites.is_empty() {
+            return;
+        }
+        let known_ids: std::collections::HashSet<&str> = entries.iter().map(|e| e.id.as_str()).collect();
+        let mut changed = false;
+        for fav in self.favorites.iter_mut() {
+            if known_ids.contains(fav.id.as_str()) {
+                continue;
+            }
+            let old_target = fav.target.to_ascii_lowercase();
+            if old_target.is_empty() {
+                continue;
+            }
+            if let Some(match_entry) = entries.iter().find(|e| {
+                e.target.to_string_lossy().to_ascii_lowercase() == old_target
+            }) {
+                log::debug(format!(
+                    "apps: remapped favorite {} -> {}",
+                    fav.id, match_entry.id
+                ));
+                fav.id = match_entry.id.clone();
+                changed = true;
+            }
+        }
+        if changed {
+            let _ = self.save();
+        }
     }
 
     pub fn hotkey_bindings(&self) -> Vec<HotkeyBinding> {

@@ -12,7 +12,7 @@ use windows::Win32::UI::Shell::{IShellLinkW, ShellLink, SLGP_RAWPATH};
 use crate::log;
 use crate::util;
 
-use super::AppEntry;
+use super::{app_paths_scan, apps_folder_scan, AppEntry, AppSource};
 
 pub fn start_menu_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
@@ -25,16 +25,48 @@ pub fn start_menu_roots() -> Vec<PathBuf> {
     roots
 }
 
-pub fn dir_mtime(roots: &[PathBuf]) -> u64 {
-    roots
-        .iter()
-        .filter_map(|root| root.metadata().ok()?.modified().ok())
-        .map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs())
-        .max()
-        .unwrap_or(0)
+pub fn scan_all() -> Vec<AppEntry> {
+    let mut by_key: HashMap<String, usize> = HashMap::new();
+    let mut out: Vec<AppEntry> = Vec::new();
+
+    merge_into(&mut out, &mut by_key, apps_folder_scan());
+    merge_into(&mut out, &mut by_key, scan_start_menu());
+    merge_into(&mut out, &mut by_key, app_paths_scan());
+
+    out.sort_by(|a, b| a.name.to_ascii_lowercase().cmp(&b.name.to_ascii_lowercase()));
+    log::debug(format!("apps: indexed {} programs (merged)", out.len()));
+    out
 }
 
-pub fn scan_all() -> Vec<AppEntry> {
+fn merge_into(out: &mut Vec<AppEntry>, by_key: &mut HashMap<String, usize>, incoming: Vec<AppEntry>) {
+    for entry in incoming {
+        let key = entry.id.clone();
+        if let Some(&idx) = by_key.get(&key) {
+            if let Some(existing) = out.get_mut(idx) {
+                if entry.name.len() > existing.name.len() {
+                    existing.name = entry.name;
+                }
+                if existing.aumid.is_none() && entry.aumid.is_some() {
+                    existing.aumid = entry.aumid;
+                }
+                if existing.target.as_os_str().is_empty() && !entry.target.as_os_str().is_empty() {
+                    existing.target = entry.target;
+                }
+                if existing.source_lnk.as_os_str().is_empty() && !entry.source_lnk.as_os_str().is_empty() {
+                    existing.source_lnk = entry.source_lnk;
+                }
+                if existing.args.is_empty() && !entry.args.is_empty() {
+                    existing.args = entry.args;
+                }
+            }
+            continue;
+        }
+        by_key.insert(key, out.len());
+        out.push(entry);
+    }
+}
+
+fn scan_start_menu() -> Vec<AppEntry> {
     let roots = start_menu_roots();
     let mut links = Vec::new();
     for root in &roots {
@@ -42,7 +74,7 @@ pub fn scan_all() -> Vec<AppEntry> {
     }
     log::debug(format!("apps: found {} shortcuts", links.len()));
 
-    let mut by_target: HashMap<String, AppEntry> = HashMap::new();
+    let mut out: Vec<AppEntry> = Vec::new();
     for lnk in links {
         let Some((target, args)) = resolve_lnk(&lnk) else {
             continue;
@@ -55,7 +87,8 @@ pub fn scan_all() -> Vec<AppEntry> {
             .and_then(|s| s.to_str())
             .unwrap_or("App")
             .to_string();
-        let id = entry_id(&target, &args);
+        let aumid = extract_aumid_from_args(&args);
+        let id = entry_id(&target, aumid.as_deref(), &args);
         let exe_name = target
             .file_name()
             .and_then(|s| s.to_str())
@@ -67,21 +100,43 @@ pub fn scan_all() -> Vec<AppEntry> {
             .and_then(|s| s.to_str())
             .unwrap_or("")
             .to_string();
-        let search_label = format!("{name} {exe_name} {parent}");
-        let entry = AppEntry {
-            id: id.clone(),
+        let aumid_str = aumid.clone().unwrap_or_default();
+        let search_label = format!("{name} {exe_name} {parent} {aumid_str}");
+
+        let source = if aumid.is_some() {
+            AppSource::AppsFolder
+        } else {
+            AppSource::StartMenu
+        };
+
+        out.push(AppEntry {
+            id,
             name,
             target,
             args,
             source_lnk: lnk,
             search_label,
-        };
-        by_target.entry(id).or_insert(entry);
+            aumid,
+            source,
+        });
     }
-    let mut out: Vec<_> = by_target.into_values().collect();
-    out.sort_by_key(|a| a.name.to_ascii_lowercase());
-    log::debug(format!("apps: indexed {} programs", out.len()));
     out
+}
+
+fn extract_aumid_from_args(args: &str) -> Option<String> {
+    let lower = args.to_ascii_lowercase();
+    let marker = "shell:appsfolder\\";
+    let idx = lower.find(marker)?;
+    let rest = &args[idx + marker.len()..];
+    let end = rest
+        .find(|c: char| c.is_whitespace() || c == '"')
+        .unwrap_or(rest.len());
+    let candidate = rest[..end].trim().to_string();
+    if candidate.is_empty() || !candidate.contains('!') {
+        None
+    } else {
+        Some(candidate)
+    }
 }
 
 fn collect_links(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -98,16 +153,20 @@ fn collect_links(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-fn entry_id(target: &Path, args: &str) -> String {
-    let key = format!(
-        "{}|{}",
-        target.to_string_lossy().to_ascii_lowercase(),
-        args.trim()
-    );
+pub(crate) fn entry_id(target: &Path, aumid: Option<&str>, args: &str) -> String {
+    let key = if let Some(a) = aumid {
+        format!("aumid:{a}")
+    } else {
+        format!(
+            "exe:{}|{}",
+            target.to_string_lossy().to_ascii_lowercase(),
+            args.trim()
+        )
+    };
     format!("{:x}", fnv1a(&key))
 }
 
-fn fnv1a(s: &str) -> u64 {
+pub(crate) fn fnv1a(s: &str) -> u64 {
     let mut hash = 0xcbf29ce484222325u64;
     for b in s.bytes() {
         hash ^= b as u64;

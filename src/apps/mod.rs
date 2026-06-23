@@ -1,3 +1,5 @@
+mod app_paths;
+mod apps_folder;
 mod cache;
 pub mod controller;
 mod enumerate;
@@ -23,9 +25,19 @@ pub use favorites::{shared_favorites, AppIndexRef, SharedFavorites};
 pub use controller::AppMenuAnchor;
 
 use cache::load_or_scan;
-use enumerate::{dir_mtime, start_menu_roots, scan_all};
+use enumerate::scan_all;
 use favorites::FavoritesStore as Store;
 use launch::launch;
+
+const REFRESH_TTL_SECS: u64 = 30 * 60;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum AppSource {
+    #[default]
+    StartMenu,
+    AppsFolder,
+    AppPath,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AppEntry {
@@ -35,16 +47,20 @@ pub struct AppEntry {
     pub args: String,
     pub source_lnk: std::path::PathBuf,
     pub search_label: String,
+    #[serde(default)]
+    pub aumid: Option<String>,
+    #[serde(default)]
+    pub source: AppSource,
 }
 
 struct AppIndex {
     entries: Vec<AppEntry>,
-    mtime: u64,
+    scanned_at: u64,
 }
 
 static INDEX: RwLock<Option<AppIndex>> = RwLock::new(None);
 static REFRESHING: AtomicBool = AtomicBool::new(false);
-static LAST_MTIME_CHECK: AtomicU64 = AtomicU64::new(0);
+static LAST_REFRESH_CHECK: AtomicU64 = AtomicU64::new(0);
 
 pub fn init() {
     thread::spawn(|| {
@@ -52,8 +68,9 @@ pub fn init() {
             let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         }
         let entries = load_or_scan();
-        let mtime = dir_mtime(&start_menu_roots());
-        *INDEX.write() = Some(AppIndex { entries, mtime });
+        shared_favorites().lock().remap_to(&entries);
+        let scanned_at = now_secs();
+        *INDEX.write() = Some(AppIndex { entries, scanned_at });
         log::debug("apps: index ready");
         unsafe {
             CoUninitialize();
@@ -77,11 +94,12 @@ pub fn refresh_async() {
         unsafe {
             let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         }
-        let roots = start_menu_roots();
-        let mtime = dir_mtime(&roots);
         let entries = scan_all();
-        cache::save_cache(&paths::apps_cache_path(), mtime, &entries);
-        *INDEX.write() = Some(AppIndex { entries, mtime });
+        shared_favorites().lock().remap_to(&entries);
+        cache::save_cache(&paths::apps_cache_path(), &entries);
+        let scanned_at = now_secs();
+        *INDEX.write() = Some(AppIndex { entries, scanned_at });
+        LAST_REFRESH_CHECK.store(scanned_at, Ordering::Relaxed);
         REFRESHING.store(false, Ordering::Release);
         log::debug("apps: index refreshed");
         unsafe {
@@ -91,25 +109,27 @@ pub fn refresh_async() {
 }
 
 pub fn maybe_refresh() {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let last = LAST_MTIME_CHECK.load(Ordering::Relaxed);
+    let now = now_secs();
+    let last = LAST_REFRESH_CHECK.load(Ordering::Relaxed);
     if now.saturating_sub(last) < 60 {
         return;
     }
-    LAST_MTIME_CHECK.store(now, Ordering::Relaxed);
+    LAST_REFRESH_CHECK.store(now, Ordering::Relaxed);
 
-    let roots = start_menu_roots();
-    let mtime = dir_mtime(&roots);
     let stale = INDEX
         .read()
         .as_ref()
-        .is_none_or(|i| i.mtime != mtime);
+        .is_none_or(|i| now.saturating_sub(i.scanned_at) > REFRESH_TTL_SECS);
     if stale {
         refresh_async();
     }
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 pub fn launch_by_id(id: &str, favorites: &Store) -> bool {
@@ -136,4 +156,12 @@ pub fn hook_enabled(config: &Config) -> bool {
 
 pub fn open_menu(anchor: AppMenuAnchor) {
     crate::launcher::open_app_menu(anchor);
+}
+
+pub(crate) fn app_paths_scan() -> Vec<AppEntry> {
+    app_paths::scan()
+}
+
+pub(crate) fn apps_folder_scan() -> Vec<AppEntry> {
+    apps_folder::scan()
 }

@@ -129,7 +129,13 @@ impl AppMenuController {
                 }
             }
             AppMenuAction::ToggleFavorite(id) => {
-                favorites.lock().toggle(&id);
+                let target = self
+                    .rows
+                    .iter()
+                    .find(|r| r.entry.id == id)
+                    .map(|r| r.entry.target.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                favorites.lock().toggle(&id, &target);
                 self.rebuild_rows(favorites);
                 post_reload();
             }
@@ -264,6 +270,8 @@ mod tests {
             args: String::new(),
             source_lnk: std::path::PathBuf::from(format!("C:\\{name}.lnk")),
             search_label: label.into(),
+            aumid: None,
+            source: crate::apps::AppSource::StartMenu,
         }
     }
 
@@ -279,10 +287,12 @@ mod tests {
                 FavoriteEntry {
                     id: "c".into(),
                     hotkey: String::new(),
+                    target: String::new(),
                 },
                 FavoriteEntry {
                     id: "a".into(),
                     hotkey: String::new(),
+                    target: String::new(),
                 },
             ],
         };
@@ -325,6 +335,7 @@ mod tests {
             favorites: vec![FavoriteEntry {
                 id: "b".into(),
                 hotkey: String::new(),
+                target: String::new(),
             }],
         };
         let rows = build_app_rows("chromium", 16, &all, &favorites, &mut FuzzySearch::default());
@@ -342,6 +353,7 @@ mod tests {
             favorites: vec![FavoriteEntry {
                 id: "b".into(),
                 hotkey: String::new(),
+                target: String::new(),
             }],
         };
         let rows = build_app_rows("chrome", 16, &all, &favorites, &mut FuzzySearch::default());
