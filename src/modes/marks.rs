@@ -32,28 +32,6 @@ pub fn filled_entries(store: &MarksStore) -> Vec<MarkEntry> {
         .collect()
 }
 
-pub fn switcher_entries(store: &MarksStore) -> Vec<MarkEntry> {
-    filled_entries(store)
-        .into_iter()
-        .filter(|entry| entry.window.is_some())
-        .collect()
-}
-
-pub fn index_after_foreground(entries: &[MarkEntry]) -> usize {
-    if entries.is_empty() {
-        return 0;
-    }
-    let fg = get_foreground_window();
-    let current_idx = fg.and_then(|fg_win| {
-        entries.iter().position(|e| {
-            e.window
-                .as_ref()
-                .is_some_and(|w| w.hwnd == fg_win.hwnd)
-        })
-    });
-    current_idx.unwrap_or_default()
-}
-
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct MarksStore {
     #[serde(default)]
@@ -217,6 +195,7 @@ pub enum ToggleMarkResult {
 pub struct MarksState {
     pub store: MarksStore,
     pub cycle_index: usize,
+    pub mru_slots: Vec<u8>,
 }
 
 impl MarksState {
@@ -225,7 +204,67 @@ impl MarksState {
         Self {
             store: MarksStore::load(),
             cycle_index: 0,
+            mru_slots: Vec::new(),
         }
+    }
+
+    pub fn touch_slot(&mut self, slot: u8) {
+        if let Some(pos) = self.mru_slots.iter().position(|&s| s == slot) {
+            self.mru_slots.remove(pos);
+        }
+        self.mru_slots.insert(0, slot);
+    }
+
+    pub fn switcher_entries(&mut self) -> Vec<MarkEntry> {
+        let entries = filled_entries(&self.store)
+            .into_iter()
+            .filter(|entry| entry.window.is_some())
+            .collect::<Vec<_>>();
+
+        if entries.is_empty() {
+            return Vec::new();
+        }
+
+        if let Some(fg) = get_foreground_window() {
+            if let Some(fg_entry) = entries.iter().find(|e| e.window.as_ref().is_some_and(|w| w.hwnd == fg.hwnd)) {
+                self.touch_slot(fg_entry.slot);
+            }
+        }
+
+        for entry in &entries {
+            if !self.mru_slots.contains(&entry.slot) {
+                self.mru_slots.push(entry.slot);
+            }
+        }
+        self.mru_slots.retain(|s| entries.iter().any(|e| e.slot == *s));
+
+        entries
+    }
+
+    pub fn initial_selected_index(&self, entries: &[MarkEntry]) -> usize {
+        if entries.len() <= 1 {
+            return 0;
+        }
+
+        let target_slot = if self.mru_slots.len() > 1 {
+            Some(self.mru_slots[1])
+        } else {
+            None
+        };
+
+        if let Some(slot) = target_slot {
+            if let Some(idx) = entries.iter().position(|e| e.slot == slot) {
+                return idx;
+            }
+        }
+
+        if let Some(fg) = get_foreground_window() {
+            if let Some(fg_idx) = entries.iter().position(|e| e.window.as_ref().is_some_and(|w| w.hwnd == fg.hwnd)) {
+                return (fg_idx + 1) % entries.len();
+            }
+        }
+
+        0
     }
 
     pub fn cycle_mark(&mut self, forward: bool) -> bool {

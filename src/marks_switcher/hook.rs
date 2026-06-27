@@ -19,7 +19,7 @@ use crate::config::{parse_chord, parse_hold_chord, Config, HoldChord};
 use crate::hotkeys::{hotkey_hwnd, MARKS_POLL_TIMER_ID, WM_JUMP_KEY, WM_MARKS_KEY};
 use crate::log;
 use crate::marks_switcher::{ui_sender, SwitcherUiCommand};
-use crate::modes::marks::{index_after_foreground, switcher_entries, SharedMarks};
+use crate::modes::marks::SharedMarks;
 use crate::window::focus;
 
 const LLKHF_UP: u32 = 0x80;
@@ -215,7 +215,9 @@ pub fn dispatch_jump(slot: u8) {
         };
         state.marks.clone()
     };
-    if marks.lock().store.jump_slot(slot) {
+    let mut guard = marks.lock();
+    if guard.store.jump_slot(slot) {
+        guard.touch_slot(slot);
         log::debug(format!("hook jump slot {slot}: ok"));
     } else {
         log::warn(format!("hook jump slot {slot}: missed"));
@@ -271,14 +273,15 @@ pub fn dispatch_key(vk: u32, key_up: bool) {
                 log::debug(format!("marks_switcher confirm on key up vk=0x{vk:X}"));
                 let selected = state.selected;
                 let entries = state.entries.clone();
+                let marks = state.marks.clone();
                 cancel_active(state);
-                Some((selected, entries))
+                Some((selected, entries, marks))
             } else {
                 None
             }
         };
-        if let Some((selected, entries)) = confirm {
-            focus_selected(&entries, selected);
+        if let Some((selected, entries, marks)) = confirm {
+            focus_selected(&marks, &entries, selected);
         }
         return;
     }
@@ -337,14 +340,15 @@ pub fn poll_active() {
             log::debug("marks_switcher poll: chord released");
             let selected = state.selected;
             let entries = state.entries.clone();
+            let marks = state.marks.clone();
             cancel_active(state);
-            Some((selected, entries))
+            Some((selected, entries, marks))
         } else {
             None
         }
     };
-    if let Some((selected, entries)) = confirm {
-        focus_selected(&entries, selected);
+    if let Some((selected, entries, marks)) = confirm {
+        focus_selected(&marks, &entries, selected);
     }
 }
 
@@ -394,10 +398,11 @@ fn cancel_active(state: &mut HookState) {
     send_ui(SwitcherUiCommand::Hide);
 }
 
-fn focus_selected(entries: &[crate::modes::marks::MarkEntry], selected: usize) {
+fn focus_selected(marks: &SharedMarks, entries: &[crate::modes::marks::MarkEntry], selected: usize) {
     let Some(entry) = entries.get(selected) else {
         return;
     };
+    marks.lock().touch_slot(entry.slot);
     if let Some(win) = &entry.window {
         if should_focus_target(win.hwnd) {
             focus::focus_window(win.hwnd);
@@ -436,16 +441,17 @@ fn send_ui(cmd: SwitcherUiCommand) {
 }
 
 fn activate(state: &mut HookState) {
-    let entries = {
-        let guard = state.marks.lock();
-        switcher_entries(&guard.store)
+    let (entries, selected) = {
+        let mut guard = state.marks.lock();
+        let entries = guard.switcher_entries();
+        let selected = guard.initial_selected_index(&entries);
+        (entries, selected)
     };
     if entries.is_empty() {
         log::debug("marks_switcher: no available marks");
         log::notify("WinHarpoon", "No marked windows");
         return;
     }
-    let selected = index_after_foreground(&entries);
     state.entries = entries;
     state.selected = selected;
     state.active = true;
