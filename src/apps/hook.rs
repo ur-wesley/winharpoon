@@ -33,7 +33,17 @@ struct HookState {
 
 static HOOK: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
 static STATE: Mutex<Option<HookState>> = Mutex::new(None);
-static LAST_ALT_TAP: Mutex<Option<Instant>> = Mutex::new(None);
+struct AltTapTracker {
+    alt_is_down: bool,
+    press_time: Option<Instant>,
+    last_tap_release: Option<Instant>,
+}
+
+static ALT_TAP_TRACKER: Mutex<AltTapTracker> = Mutex::new(AltTapTracker {
+    alt_is_down: false,
+    press_time: None,
+    last_tap_release: None,
+});
 
 const ALT_DOUBLE_TAP_MS: u128 = 450;
 
@@ -106,32 +116,64 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
     CallNextHookEx(Some(HHOOK(HOOK.load(Ordering::Acquire))), code, wparam, lparam)
 }
 
-pub fn try_alt_double_tap(vk: u32) {
+pub fn try_alt_double_tap(vk: u32, key_up: bool) {
+    let mut tracker = ALT_TAP_TRACKER.lock();
+
     if !is_alt_vk(vk) {
-        *LAST_ALT_TAP.lock() = None;
+        if !key_up {
+            tracker.alt_is_down = false;
+            tracker.press_time = None;
+            tracker.last_tap_release = None;
+        }
         return;
     }
+
     let enabled = STATE
         .lock()
         .as_ref()
         .is_some_and(|s| s.config.enabled);
     if !enabled || other_modifiers_held() {
-        *LAST_ALT_TAP.lock() = None;
+        tracker.alt_is_down = false;
+        tracker.press_time = None;
+        tracker.last_tap_release = None;
         return;
     }
+
     let now = Instant::now();
-    let mut last = LAST_ALT_TAP.lock();
-    if let Some(prev) = *last {
-        if now.duration_since(prev).as_millis() <= ALT_DOUBLE_TAP_MS {
-            *last = None;
-            if let Some((x, y)) = cursor_pos() {
-                log::debug(format!("apps: alt double-tap at ({x},{y})"));
-                post_app_menu(x, y);
+
+    if key_up {
+        tracker.alt_is_down = false;
+        if let Some(press_time) = tracker.press_time.take() {
+            if now.duration_since(press_time).as_millis() <= 350 {
+                tracker.last_tap_release = Some(now);
+            } else {
+                tracker.last_tap_release = None;
             }
+        } else {
+            tracker.last_tap_release = None;
+        }
+    } else {
+        if tracker.alt_is_down {
+            tracker.press_time = None;
+            tracker.last_tap_release = None;
             return;
         }
+
+        tracker.alt_is_down = true;
+        tracker.press_time = Some(now);
+
+        if let Some(prev_release) = tracker.last_tap_release.take() {
+            if now.duration_since(prev_release).as_millis() <= ALT_DOUBLE_TAP_MS {
+                tracker.alt_is_down = true;
+                tracker.press_time = None;
+                tracker.last_tap_release = None;
+                if let Some((x, y)) = cursor_pos() {
+                    log::debug(format!("apps: alt double-tap at ({x},{y})"));
+                    post_app_menu(x, y);
+                }
+            }
+        }
     }
-    *last = Some(now);
 }
 
 fn handle_click(state: &mut HookState, x: i32, y: i32) {

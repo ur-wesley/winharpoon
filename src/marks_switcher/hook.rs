@@ -836,8 +836,8 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
                 trigger_launcher = handle_launcher_key(state, vk, key_up);
                 handle_switcher_nav_key(state, vk, key_up);
                 
-                if !key_up && !injected {
-                    crate::apps::hook::try_alt_double_tap(vk);
+                if !injected {
+                    crate::apps::hook::try_alt_double_tap(vk, key_up);
                 }
                 
                 swallow = should_swallow_key(state, vk, key_up);
