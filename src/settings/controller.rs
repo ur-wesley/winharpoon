@@ -16,6 +16,7 @@ pub enum SettingsAction {
     SetAutostart(bool),
     SetAltDoubleClick(bool),
     SetAltDoubleClickScope(String),
+    SetDoubleTapKey(String),
     RebuildAppIndex,
     StartCapture(String),
     CancelCapture,
@@ -110,6 +111,12 @@ impl SettingsController {
             }
             SettingsAction::SetAltDoubleClickScope(scope) => {
                 self.draft.apps.alt_double_click_scope = scope;
+                self.draft.apps.normalize();
+                self.persist_apps(config);
+            }
+            SettingsAction::SetDoubleTapKey(key) => {
+                self.draft.apps.double_tap_key = key;
+                self.draft.apps.normalize();
                 self.persist_apps(config);
             }
             SettingsAction::RebuildAppIndex => {

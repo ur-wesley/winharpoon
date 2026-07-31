@@ -56,6 +56,34 @@ pub struct LauncherConfig {
     pub max_results: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DoubleTapModifier {
+    Alt,
+    Ctrl,
+    Shift,
+    Win,
+}
+
+impl DoubleTapModifier {
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "Ctrl" => Self::Ctrl,
+            "Shift" => Self::Shift,
+            "Win" => Self::Win,
+            _ => Self::Alt,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Alt => "Alt",
+            Self::Ctrl => "Ctrl",
+            Self::Shift => "Shift",
+            Self::Win => "Win",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppsConfig {
     #[serde(default = "default_true")]
@@ -64,6 +92,8 @@ pub struct AppsConfig {
     pub alt_double_click: bool,
     #[serde(default = "default_apps_scope")]
     pub alt_double_click_scope: String,
+    #[serde(default = "default_double_tap_key")]
+    pub double_tap_key: String,
     #[serde(default = "default_apps_width")]
     pub width: f32,
     #[serde(default = "default_apps_height")]
@@ -72,12 +102,38 @@ pub struct AppsConfig {
     pub max_results: usize,
 }
 
+impl AppsConfig {
+    pub fn normalize(&mut self) {
+        if self.alt_double_click_scope == "desktop_only" {
+            self.alt_double_click_scope = "not_fullscreen".into();
+        }
+        if self.alt_double_click_scope != "not_fullscreen" {
+            self.alt_double_click_scope = "anywhere".into();
+        }
+        self.double_tap_key = DoubleTapModifier::parse(&self.double_tap_key)
+            .as_str()
+            .to_string();
+    }
+
+    pub fn blocks_in_fullscreen(&self) -> bool {
+        self.alt_double_click_scope == "not_fullscreen"
+    }
+
+    pub fn double_tap_modifier(&self) -> DoubleTapModifier {
+        DoubleTapModifier::parse(&self.double_tap_key)
+    }
+}
+
 fn default_true() -> bool {
     true
 }
 
 fn default_apps_scope() -> String {
     "anywhere".into()
+}
+
+fn default_double_tap_key() -> String {
+    "Alt".into()
 }
 
 fn default_apps_width() -> f32 {
@@ -98,6 +154,7 @@ impl Default for AppsConfig {
             enabled: true,
             alt_double_click: true,
             alt_double_click_scope: default_apps_scope(),
+            double_tap_key: default_double_tap_key(),
             width: default_apps_width(),
             height: default_apps_height(),
             max_results: default_apps_max_results(),
@@ -187,8 +244,9 @@ impl Config {
         log::debug(format!("Config::load from {}", path.display()));
         if path.exists() {
             match fs::read_to_string(&path) {
-                Ok(text) => match toml::from_str(&text) {
-                    Ok(cfg) => {
+                Ok(text) => match toml::from_str::<Config>(&text) {
+                    Ok(mut cfg) => {
+                        cfg.apps.normalize();
                         log::debug("config loaded from disk");
                         return cfg;
                     }
@@ -538,7 +596,7 @@ pub fn chord_from_vk_mods(vk: VIRTUAL_KEY, mods: u32) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::Config;
+    use super::{AppsConfig, Config, DoubleTapModifier};
 
     #[test]
     fn default_bindings_are_unique_and_parseable() {
@@ -546,5 +604,29 @@ mod tests {
         let bindings = cfg.validate().expect("default hotkeys must not collide");
         assert_eq!(bindings.len(), 26);
         assert!(bindings.iter().all(|b| b.parsed.is_some()));
+    }
+
+    #[test]
+    fn apps_config_defaults_double_tap_key_to_alt() {
+        let apps = AppsConfig::default();
+        assert_eq!(apps.double_tap_key, "Alt");
+        assert_eq!(apps.double_tap_modifier(), DoubleTapModifier::Alt);
+    }
+
+    #[test]
+    fn apps_config_normalizes_legacy_desktop_only_scope() {
+        let mut apps = AppsConfig::default();
+        apps.alt_double_click_scope = "desktop_only".into();
+        apps.normalize();
+        assert_eq!(apps.alt_double_click_scope, "not_fullscreen");
+        assert!(apps.blocks_in_fullscreen());
+    }
+
+    #[test]
+    fn apps_config_clamps_invalid_double_tap_key() {
+        let mut apps = AppsConfig::default();
+        apps.double_tap_key = "F12".into();
+        apps.normalize();
+        assert_eq!(apps.double_tap_key, "Alt");
     }
 }

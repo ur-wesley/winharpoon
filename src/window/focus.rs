@@ -160,3 +160,44 @@ fn focus_window_impl(hwnd_raw: isize, log_result: bool) -> bool {
         ok
     }
 }
+
+pub fn foreground_is_fullscreen() -> bool {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromWindow, MONITOR_DEFAULTTONEAREST, MONITORINFO,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetDesktopWindow, GetForegroundWindow, GetShellWindow, GetWindowRect,
+    };
+
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.0.is_null() {
+            return false;
+        }
+        let desktop = GetDesktopWindow();
+        let shell = GetShellWindow();
+        if hwnd == desktop || hwnd == shell {
+            return false;
+        }
+
+        let mut window_rect = RECT::default();
+        if GetWindowRect(hwnd, &mut window_rect).is_err() {
+            return false;
+        }
+
+        let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        let mut info = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        if !GetMonitorInfoW(monitor, &mut info).as_bool() {
+            return false;
+        }
+
+        window_rect.left == info.rcMonitor.left
+            && window_rect.top == info.rcMonitor.top
+            && window_rect.right == info.rcMonitor.right
+            && window_rect.bottom == info.rcMonitor.bottom
+    }
+}

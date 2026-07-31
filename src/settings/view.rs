@@ -198,12 +198,17 @@ fn render_general_row(
 }
 
 fn render_apps_row(ui: &mut egui::Ui, controller: &SettingsController, actions: &mut Vec<SettingsAction>) {
+    let modifier = controller.draft.apps.double_tap_key.as_str();
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
-            ui.label(egui::RichText::new("Alt + double-click").size(13.5).strong());
+            ui.label(
+                egui::RichText::new(format!("{modifier} + double-click"))
+                    .size(13.5)
+                    .strong(),
+            );
             native_ui::muted_label(
                 ui,
-                "Or double-tap Alt — opens centered on the active monitor",
+                "Or double-tap the chosen modifier — opens centered on the active monitor",
             );
         });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -215,13 +220,37 @@ fn render_apps_row(ui: &mut egui::Ui, controller: &SettingsController, actions: 
     });
     ui.add_space(8.0);
     ui.horizontal(|ui| {
+        ui.label("Double-tap key");
+        let mut key = controller.draft.apps.double_tap_key.clone();
+        egui::ComboBox::from_id_salt("apps_double_tap_key")
+            .selected_text(&key)
+            .show_ui(ui, |ui| {
+                for option in ["Alt", "Ctrl", "Shift", "Win"] {
+                    if ui
+                        .selectable_value(&mut key, option.to_string(), option)
+                        .clicked()
+                    {
+                        actions.push(SettingsAction::SetDoubleTapKey(key.clone()));
+                    }
+                }
+            });
+    });
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
         ui.label("Scope");
         let mut scope = controller.draft.apps.alt_double_click_scope.clone();
+        let scope_label = match scope.as_str() {
+            "not_fullscreen" => "Not when fullscreen",
+            _ => "Anywhere",
+        };
         egui::ComboBox::from_id_salt("apps_scope")
-            .selected_text(&scope)
+            .selected_text(scope_label)
             .show_ui(ui, |ui| {
-                for s in ["anywhere", "desktop_only"] {
-                    if ui.selectable_value(&mut scope, s.to_string(), s).clicked() {
+                for (value, label) in [("anywhere", "Anywhere"), ("not_fullscreen", "Not when fullscreen")] {
+                    if ui
+                        .selectable_value(&mut scope, value.to_string(), label)
+                        .clicked()
+                    {
                         actions.push(SettingsAction::SetAltDoubleClickScope(scope.clone()));
                     }
                 }
