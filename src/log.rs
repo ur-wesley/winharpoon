@@ -90,7 +90,7 @@ fn prune_log_file(path: &std::path::Path) -> io::Result<()> {
     if lines.len() > MAX_LOG_ENTRIES {
         let start = lines.len() - MAX_LOG_ENTRIES;
         let pruned_content = lines[start..].join("\n") + "\n";
-        std::fs::write(path, pruned_content)?;
+        crate::paths::atomic_write(path, &pruned_content)?;
     }
     Ok(())
 }
@@ -99,13 +99,20 @@ fn timestamp() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_secs());
     format!("{secs}")
 }
 
+pub fn truncate_notify_body(body: &str) -> String {
+    body.chars().take(180).collect()
+}
+
 pub fn notify(title: &str, body: &str) {
-    info(format!("NOTIFY {title}: {body}"));
+    // Security: toasts show attacker-influenced app/title text — keep it, but
+    // never let log lines leak full titles at info level; caller already redacted.
+    // Truncate to avoid toast-spoof overflow.
+    let body_short = truncate_notify_body(body);
+    info(format!("NOTIFY {title}: {body_short}"));
 
     let Some(app_id) = TOAST_APP_ID.get() else {
         warn("notify called before init_toast");
@@ -138,19 +145,20 @@ mod tests {
     fn test_prune_log_file() {
         let temp_dir = std::env::temp_dir();
         let test_path = temp_dir.join("test_winharpoon_prune.log");
-        println!("test_path: {:?}", test_path);
+        println!("test_path: {test_path:?}");
         
         // Write 6000 lines
         let mut content = String::new();
         for i in 0..6000 {
-            content.push_str(&format!("Line {}\n", i));
+            use std::fmt::Write as _;
+            let _ = writeln!(content, "Line {i}");
         }
         fs::write(&test_path, &content).unwrap();
         assert!(test_path.exists(), "File should exist after writing");
 
         // Prune the file
         let prune_res = prune_log_file(&test_path);
-        println!("prune_res: {:?}", prune_res);
+        println!("prune_res: {prune_res:?}");
         prune_res.unwrap();
         assert!(test_path.exists(), "File should exist after pruning");
 
@@ -163,6 +171,13 @@ mod tests {
 
         // Clean up
         let _ = fs::remove_file(&test_path);
+    }
+
+    #[test]
+    fn truncate_notify_body_caps_at_180_chars() {
+        let long = "x".repeat(500);
+        assert_eq!(truncate_notify_body(&long).chars().count(), 180);
+        assert_eq!(truncate_notify_body("short"), "short");
     }
 }
 

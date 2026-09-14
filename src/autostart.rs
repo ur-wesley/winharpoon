@@ -12,7 +12,23 @@ const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const VALUE_NAME: &str = "WinHarpoon";
 
 pub fn is_enabled() -> bool {
-    read_run_value().is_some()
+    let Some(value) = read_run_value() else {
+        return false;
+    };
+    // Usability+security: only report enabled when the Run value actually points to us.
+    // A foreign value under our name is hijack/confusion — don't claim it.
+    current_quoted_exe().is_ok_and(|ours| normalize(&value) == normalize(&ours))
+}
+
+/// True when a Run value exists but doesn't point at this exe (possible hijack or stale path).
+pub fn has_foreign_value() -> bool {
+    let Some(value) = read_run_value() else {
+        return false;
+    };
+    if value.trim().is_empty() {
+        return false;
+    }
+    current_quoted_exe().map_or(true, |ours| normalize(&value) != normalize(&ours))
 }
 
 pub fn apply(enabled: bool) -> Result<(), String> {
@@ -28,6 +44,14 @@ pub fn apply(enabled: bool) -> Result<(), String> {
 }
 
 pub fn sync_from_config(enabled: bool) {
+    if has_foreign_value() {
+        log::warn("autostart Run value points elsewhere, not overwriting silently");
+        log::notify(
+            "WinHarpoon",
+            "Autostart registry entry points to another app — check Settings.",
+        );
+        return;
+    }
     let active = is_enabled();
     if active == enabled {
         log::trace(format!("autostart already synced (enabled={enabled})"));
@@ -132,17 +156,49 @@ unsafe fn open_run_key(
         access,
         &mut key,
     );
-    if status != ERROR_SUCCESS {
-        Err(format!("RegOpenKeyExW failed: {status:?}"))
-    } else {
+    if status == ERROR_SUCCESS {
         Ok(key)
+    } else {
+        Err(format!("RegOpenKeyExW failed: {status:?}"))
     }
 }
 
 fn quote_exe_path(path: &str) -> String {
-    if path.contains(' ') {
-        format!("\"{path}\"")
+    // Strip embedded quotes to block registry-value injection, then quote.
+    let clean: String = path.chars().filter(|&c| c != '"').collect();
+    if clean.contains(' ') {
+        format!("\"{clean}\"")
     } else {
-        path.to_string()
+        clean
+    }
+}
+
+fn current_quoted_exe() -> Result<String, String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    Ok(quote_exe_path(&exe.display().to_string()))
+}
+
+fn normalize(s: &str) -> String {
+    s.trim().trim_matches('"').replace('/', "\\").to_ascii_lowercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize, quote_exe_path};
+
+    #[test]
+    fn quote_adds_quotes_only_with_spaces() {
+        assert_eq!(quote_exe_path(r"C:\app\win.exe"), r"C:\app\win.exe");
+        assert_eq!(quote_exe_path(r"C:\my app\win.exe"), r#""C:\my app\win.exe""#);
+    }
+
+    #[test]
+    fn quote_strips_embedded_quotes() {
+        assert_eq!(quote_exe_path("C:\\evil\"bar.exe"), r"C:\evilbar.exe");
+    }
+
+    #[test]
+    fn normalize_canonicalizes_run_values() {
+        assert_eq!(normalize("\"C:/APP/win.EXE\" "), r"c:\app\win.exe");
     }
 }

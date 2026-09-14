@@ -244,13 +244,22 @@ impl Config {
         log::debug(format!("Config::load from {}", path.display()));
         if path.exists() {
             match fs::read_to_string(&path) {
-                Ok(text) => match toml::from_str::<Config>(&text) {
+                Ok(text) => match toml::from_str::<Self>(&text) {
                     Ok(mut cfg) => {
-                        cfg.apps.normalize();
+                        cfg.normalize();
                         log::debug("config loaded from disk");
                         return cfg;
                     }
-                    Err(err) => log::error(format!("config parse error: {err}")),
+                    Err(err) => {
+                        // Usability: never silently destroy user config.
+                        // Backup corrupt file and keep running on defaults.
+                        log::error(format!("config parse error: {err}"));
+                        paths::backup_corrupt_file(&path);
+                        log::notify(
+                            "WinHarpoon config error",
+                            "Config was invalid — backup saved, using defaults.",
+                        );
+                    }
                 },
                 Err(err) => log::error(format!("config read error: {err}")),
             }
@@ -258,10 +267,15 @@ impl Config {
             log::debug("config file missing, creating defaults");
         }
         let cfg = Self::default();
-        let _ = cfg.save();
+        // Only write defaults when no file existed; never overwrite a corrupt file we just backed up.
+        if !path.exists() {
+            let _ = cfg.save();
+        }
         cfg
     }
 
+    // Test stub returns Ok without touching self/disk; the real impl below uses both.
+    #[cfg_attr(test, allow(clippy::unused_self, clippy::unnecessary_wraps))]
     pub fn save(&self) -> std::io::Result<()> {
         #[cfg(test)]
         {
@@ -273,7 +287,42 @@ impl Config {
             let path = paths::config_path();
             log::debug(format!("Config::save to {}", path.display()));
             let text = toml::to_string_pretty(self).expect("serialize config");
-            fs::write(path, text)
+            paths::atomic_write(&path, &text)
+        }
+    }
+
+    pub fn normalize(&mut self) {
+        self.apps.normalize();
+        // Usability: clamp launcher geometry so a bad TOML edit can't trap focus in a 0px window.
+        if !self.launcher.width.is_finite() || self.launcher.width < 200.0 {
+            self.launcher.width = 200.0;
+        } else if self.launcher.width > 1600.0 {
+            self.launcher.width = 1600.0;
+        }
+        if !self.launcher.height.is_finite() || self.launcher.height < 120.0 {
+            self.launcher.height = 120.0;
+        } else if self.launcher.height > 1200.0 {
+            self.launcher.height = 1200.0;
+        }
+        if self.launcher.max_results == 0 {
+            self.launcher.max_results = 12;
+        } else if self.launcher.max_results > 100 {
+            self.launcher.max_results = 100;
+        }
+        if !self.apps.width.is_finite() || self.apps.width < 200.0 {
+            self.apps.width = 440.0;
+        } else if self.apps.width > 1600.0 {
+            self.apps.width = 1600.0;
+        }
+        if !self.apps.height.is_finite() || self.apps.height < 120.0 {
+            self.apps.height = 420.0;
+        } else if self.apps.height > 1200.0 {
+            self.apps.height = 1200.0;
+        }
+        if self.apps.max_results == 0 {
+            self.apps.max_results = 16;
+        } else if self.apps.max_results > 100 {
+            self.apps.max_results = 100;
         }
     }
 
@@ -402,10 +451,11 @@ fn validate_bindings(
             seen.insert(parsed.clone(), b.label.clone());
         }
         if is_windows_reserved(&b.chord) {
-            log::warn(format!(
-                "warning: {} uses a Windows-reserved chord {}",
-                b.label, b.chord
-            ));
+            errors.push(ConfigValidationError::InvalidChord {
+                label: b.label.clone(),
+                chord: b.chord.clone(),
+                reason: "Windows-reserved chord (OS will swallow it)".into(),
+            });
         }
     }
 
@@ -596,7 +646,7 @@ pub fn chord_from_vk_mods(vk: VIRTUAL_KEY, mods: u32) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{AppsConfig, Config, DoubleTapModifier};
+    use super::{parse_chord, AppsConfig, Config, DoubleTapModifier};
 
     #[test]
     fn default_bindings_are_unique_and_parseable() {
@@ -615,8 +665,10 @@ mod tests {
 
     #[test]
     fn apps_config_normalizes_legacy_desktop_only_scope() {
-        let mut apps = AppsConfig::default();
-        apps.alt_double_click_scope = "desktop_only".into();
+        let mut apps = AppsConfig {
+            alt_double_click_scope: "desktop_only".into(),
+            ..AppsConfig::default()
+        };
         apps.normalize();
         assert_eq!(apps.alt_double_click_scope, "not_fullscreen");
         assert!(apps.blocks_in_fullscreen());
@@ -624,9 +676,58 @@ mod tests {
 
     #[test]
     fn apps_config_clamps_invalid_double_tap_key() {
-        let mut apps = AppsConfig::default();
-        apps.double_tap_key = "F12".into();
+        let mut apps = AppsConfig {
+            double_tap_key: "F12".into(),
+            ..AppsConfig::default()
+        };
         apps.normalize();
         assert_eq!(apps.double_tap_key, "Alt");
+    }
+
+    #[test]
+    fn parse_chord_rejects_multiple_keys() {
+        assert!(parse_chord("Ctrl+A+B").is_err());
+    }
+
+    #[test]
+    fn parse_chord_rejects_missing_key() {
+        assert!(parse_chord("Win+Alt").is_err());
+    }
+
+    #[test]
+    fn parse_chord_rejects_unknown_key() {
+        assert!(parse_chord("Win+Frobnicate").is_err());
+    }
+
+    #[test]
+    fn reserved_chord_is_validation_error() {
+        let mut cfg = Config::default();
+        cfg.hotkeys.launcher = "Win+L".into();
+        let err = cfg.validate().expect_err("Win+L must be rejected");
+        assert!(err.iter().any(|e| format!("{e:?}").contains("launcher")));
+    }
+
+    #[test]
+    fn normalize_clamps_geometry_and_results() {
+        let mut cfg = Config::default();
+        cfg.launcher.width = 0.0;
+        cfg.launcher.height = f32::INFINITY;
+        cfg.launcher.max_results = 0;
+        cfg.apps.width = 5000.0;
+        cfg.apps.max_results = 500;
+        cfg.normalize();
+        assert!((cfg.launcher.width - 200.0).abs() < f32::EPSILON);
+        assert!((cfg.launcher.height - 120.0).abs() < f32::EPSILON);
+        assert_eq!(cfg.launcher.max_results, 12);
+        assert!((cfg.apps.width - 1600.0).abs() < f32::EPSILON);
+        assert_eq!(cfg.apps.max_results, 100);
+    }
+
+    #[test]
+    fn set_binding_chord_empty_removes_slot() {
+        let mut cfg = Config::default();
+        assert!(cfg.hotkeys.mark.contains_key("1"));
+        cfg.set_binding_chord("mark_1", String::new());
+        assert!(!cfg.hotkeys.mark.contains_key("1"));
     }
 }
