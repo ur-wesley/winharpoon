@@ -12,7 +12,8 @@ static CACHE: LazyLock<Mutex<HashMap<PathBuf, String>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub fn process_display_name(exe_path: &Path) -> String {
-    if let Some(cached) = CACHE.lock().get(exe_path).cloned() {
+    let cached = CACHE.lock().get(exe_path).cloned();
+    if let Some(cached) = cached {
         return cached;
     }
     let name = query_process_name(exe_path);
@@ -49,10 +50,10 @@ fn format_exe_stem(exe_path: &Path) -> String {
 
 fn title_word(word: &str) -> String {
     let mut chars = word.chars();
-    match chars.next() {
-        None => String::new(),
-        Some(first) => first.to_uppercase().collect::<String>() + &chars.as_str().to_lowercase(),
-    }
+    chars.next().map_or_else(
+        String::new,
+        |first| first.to_uppercase().collect::<String>() + &chars.as_str().to_lowercase(),
+    )
 }
 
 unsafe fn version_string(exe_path: &Path, field: &str) -> Option<String> {

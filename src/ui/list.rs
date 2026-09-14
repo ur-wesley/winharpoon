@@ -14,13 +14,10 @@ impl ListSelection {
         if len == 0 {
             return;
         }
-        self.selected = if delta > 0 {
-            (self.selected + 1) % len
-        } else if self.selected == 0 {
-            len - 1
-        } else {
-            self.selected - 1
-        };
+        // Support multi-row jumps (PageUp/PageDown) with wrapping.
+        let len_i = len as i32;
+        let next = (self.selected as i32 + delta).rem_euclid(len_i);
+        self.selected = next as usize;
         self.hovered = None;
         self.scroll_to_selected = true;
     }
@@ -83,5 +80,18 @@ mod tests {
         assert_eq!(sel.selected, 0);
         assert!(sel.scroll_to_selected);
         assert_eq!(sel.hovered, None);
+    }
+
+    #[test]
+    fn navigate_handles_page_jumps_and_empty() {
+        let mut sel = ListSelection::default();
+        sel.navigate(0, 5);
+        assert_eq!(sel.selected, 0);
+        sel.navigate(10, 5);
+        assert_eq!(sel.selected, 5);
+        sel.navigate(10, -7);
+        assert_eq!(sel.selected, 8);
+        assert!(sel.take_scroll());
+        assert!(!sel.take_scroll());
     }
 }

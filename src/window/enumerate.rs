@@ -38,9 +38,10 @@ pub fn get_foreground_window() -> Option<WindowInfo> {
         }
         let info = window_info(hwnd);
         if let Some(ref w) = info {
+            // Security: never persist window titles (bank docs, secrets) to the log file.
             log::trace(format!(
-                "get_foreground_window: hwnd={} title={} process={}",
-                w.hwnd, w.title, w.process_name
+                "get_foreground_window: hwnd={} process={}",
+                w.hwnd, w.process_name
             ));
         }
         info
@@ -108,10 +109,10 @@ unsafe fn window_info(hwnd: HWND) -> Option<WindowInfo> {
     let _ = CloseHandle(process);
     res.ok()?;
     let exe_path = PathBuf::from(util::from_wide(&buf[..size as usize]));
-    let exe_name = exe_path
-        .file_name()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "unknown".into());
+    let exe_name = exe_path.file_name().map_or_else(
+        || "unknown".into(),
+        |s| s.to_string_lossy().into_owned(),
+    );
 
     if exe_name.eq_ignore_ascii_case("winharpoon.exe") {
         return None;

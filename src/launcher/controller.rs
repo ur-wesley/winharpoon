@@ -119,12 +119,10 @@ impl LauncherController {
             if let Some(hwnd) = old_active_hwnd {
                 if let Some(new_pos) = new_filtered.iter().position(|&idx| self.windows[idx].hwnd == hwnd) {
                     self.selection.selected = new_pos;
-                } else {
-                    if new_filtered.is_empty() {
-                        self.selection.selected = 0;
-                    } else if self.selection.selected >= new_filtered.len() {
-                        self.selection.selected = new_filtered.len() - 1;
-                    }
+                } else if new_filtered.is_empty() {
+                    self.selection.selected = 0;
+                } else if self.selection.selected >= new_filtered.len() {
+                    self.selection.selected = new_filtered.len() - 1;
                 }
             } else {
                 if new_filtered.is_empty() {
@@ -166,8 +164,19 @@ impl LauncherController {
         filtered.get(active_row).copied()
     }
 
+    /// Keyboard commit target: Enter always uses the keyboard selection, never
+    /// a stray mouse hover (usability: accidental mouse moves changed Enter).
+    pub fn keyboard_window_index(&self, filtered: &[usize]) -> Option<usize> {
+        filtered.get(self.selection.selected).copied()
+    }
+
     pub fn active_window<'a>(&'a self, filtered: &[usize]) -> Option<&'a WindowInfo> {
         self.active_window_index(filtered)
+            .map(|idx| &self.windows[idx])
+    }
+
+    pub fn keyboard_window<'a>(&'a self, filtered: &[usize]) -> Option<&'a WindowInfo> {
+        self.keyboard_window_index(filtered)
             .map(|idx| &self.windows[idx])
     }
 
@@ -208,11 +217,7 @@ impl LauncherController {
                 self.preview_active = false;
                 self.selection.hovered = None;
                 self.visible = false;
-                if let Some(snapshot) = snapshot {
-                    LauncherEffect::RestoreStack(snapshot)
-                } else {
-                    LauncherEffect::None
-                }
+                snapshot.map_or(LauncherEffect::None, LauncherEffect::RestoreStack)
             }
             LauncherAction::ToggleMark => {
                 if let Some(win) = self.active_window(filtered) {
@@ -274,12 +279,12 @@ pub enum LauncherEffect {
 impl LauncherEffect {
     pub fn apply(self) {
         match self {
-            LauncherEffect::None => {}
-            LauncherEffect::Focus(hwnd) => {
+            Self::None => {}
+            Self::Focus(hwnd) => {
                 let _ = focus::focus_window(hwnd);
             }
-            LauncherEffect::RestoreStack(snapshot) => restore_stack_snapshot(&snapshot),
-            LauncherEffect::Preview(hwnd) => {
+            Self::RestoreStack(snapshot) => restore_stack_snapshot(&snapshot),
+            Self::Preview(hwnd) => {
                 focus::preview_window(hwnd);
             }
         }
@@ -376,6 +381,7 @@ mod tests {
             stack_snapshot: Some(StackSnapshot {
                 foreground: Some(1),
                 z_order: vec![1, 2],
+                minimized: vec![],
             }),
             ..Default::default()
         };
@@ -403,7 +409,7 @@ mod tests {
         let mut controller = sample_controller(vec![win1.clone(), win2.clone()]);
         controller.selection.selected = 1;
 
-        let new_windows = vec![win1.clone(), win3.clone(), win2.clone()];
+        let new_windows = vec![win1, win3, win2];
         controller.update_windows_and_selection(new_windows, 16);
 
         assert_eq!(controller.selection.selected, 2);
@@ -414,12 +420,26 @@ mod tests {
         let win1 = test_window(101, "One", "one");
         let win2 = test_window(102, "Two", "two");
 
-        let mut controller = sample_controller(vec![win1.clone(), win2.clone()]);
+        let mut controller = sample_controller(vec![win1.clone(), win2]);
         controller.selection.selected = 1;
 
-        let new_windows = vec![win1.clone()];
+        let new_windows = vec![win1];
         controller.update_windows_and_selection(new_windows, 16);
 
         assert_eq!(controller.selection.selected, 0);
+    }
+
+    #[test]
+    fn keyboard_commit_ignores_stray_hover() {
+        let mut controller = sample_controller(vec![
+            test_window(1, "One", "one"),
+            test_window(2, "Two", "two"),
+        ]);
+        controller.selection.selected = 0;
+        controller.selection.hovered = Some(1);
+        let filtered = vec![0, 1];
+        // Enter path must use keyboard selection, hover only drives preview.
+        assert_eq!(controller.keyboard_window_index(&filtered), Some(0));
+        assert_eq!(controller.active_window_index(&filtered), Some(1));
     }
 }

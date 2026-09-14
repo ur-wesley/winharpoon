@@ -48,16 +48,16 @@ pub fn init(config: Arc<Mutex<Config>>, state: Arc<Mutex<AppState>>, marks: Shar
     });
 }
 
-pub(crate) fn register_context(ctx: &Context) {
+pub fn register_context(ctx: &Context) {
     let _ = UI_CTX.set(ctx.clone());
     log::debug("ui context registered");
 }
 
-pub(crate) fn take_pending_tray_menu() -> Option<TrayClickInfo> {
+pub fn take_pending_tray_menu() -> Option<TrayClickInfo> {
     PENDING_TRAY_MENU.lock().take()
 }
 
-pub(crate) fn take_pending_app_menu() -> Option<AppMenuAnchor> {
+pub fn take_pending_app_menu() -> Option<AppMenuAnchor> {
     PENDING_APP_MENU.lock().take()
 }
 

@@ -14,6 +14,8 @@ pub fn prepare_acrylic_overlay(ctx: &egui::Context, frame: Option<&eframe::Frame
 
 pub fn hide_overlay_viewport(ctx: &egui::Context) {
     ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(OFF_SCREEN));
+    // Usability/a11y: also hide so screen readers/task switchers don't see an invisible window.
+    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
 }
 
 pub fn position_overlay_at(ctx: &egui::Context, pos: egui::Pos2, content: egui::Vec2) {
@@ -29,8 +31,22 @@ pub fn position_centered_overlay(ctx: &egui::Context, content: egui::Vec2) {
     let size = crate::native_ui::overlay_viewport_size(content);
     ctx.send_viewport_cmd(egui::ViewportCommand::Transparent(true));
     ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
-    if let Some(cmd) = egui::ViewportCommand::center_on_screen(ctx) {
-        ctx.send_viewport_cmd(cmd);
+    // NOTE: egui's center_on_screen derives position from the CURRENT outer_rect
+    // size, which is stale here — the window is shared between popups of different
+    // sizes (launcher ~440px vs switcher ~1000px), so centering lagged one resize
+    // behind and froze off-center with the right edge hanging off-screen.
+    // Compute from the NEW size instead; idempotent, converges exactly.
+    let pos = ctx.input(|i| {
+        i.viewport().monitor_size.and_then(|m| {
+            if m.x > 1.0 && m.y > 1.0 {
+                Some(egui::pos2((m.x - size.x) / 2.0, (m.y - size.y) / 2.0))
+            } else {
+                None
+            }
+        })
+    });
+    if let Some(pos) = pos {
+        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
     }
     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
 }

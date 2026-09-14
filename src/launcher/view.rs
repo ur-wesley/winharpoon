@@ -17,7 +17,7 @@ pub fn render_launcher(
     ui: &mut egui::Ui,
     controller: &mut LauncherController,
     filtered: &[usize],
-    _marks: &SharedMarks,
+    marks: &SharedMarks,
     icon_cache: &mut IconCache,
     open_frames: u32,
     scroll_to: bool,
@@ -32,10 +32,10 @@ pub fn render_launcher(
         ui,
         "launcher_hints",
         &[
-            ("↑↓", "Navigate"),
+            ("Up/Down", "Navigate"),
             ("Enter", "Switch"),
             ("Ctrl+M", "Toggle mark"),
-            ("Ctrl+Shift+↑↓", "Reorder mark"),
+            ("Ctrl+Shift+Up/Down", "Reorder mark"),
             ("Esc", "Close"),
         ],
         |ui| {
@@ -66,6 +66,26 @@ pub fn render_launcher(
                 } else {
                     ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp));
                     actions.push(LauncherAction::Navigate(-1));
+                }
+            }
+            // Usability: full keyboard nav without mouse.
+            if !filtered.is_empty() {
+                if ctx.input(|i| i.key_pressed(egui::Key::PageDown)) {
+                    ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::PageDown));
+                    actions.push(LauncherAction::Navigate(5));
+                } else if ctx.input(|i| i.key_pressed(egui::Key::PageUp)) {
+                    ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::PageUp));
+                    actions.push(LauncherAction::Navigate(-5));
+                } else if ctx.input(|i| i.key_pressed(egui::Key::Home)) {
+                    ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Home));
+                    controller.selection.selected = 0;
+                    controller.selection.hovered = None;
+                    controller.preview_active = true;
+                } else if ctx.input(|i| i.key_pressed(egui::Key::End)) {
+                    ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::End));
+                    controller.selection.selected = filtered.len().saturating_sub(1);
+                    controller.selection.hovered = None;
+                    controller.preview_active = true;
                 }
             }
 
@@ -100,7 +120,7 @@ pub fn render_launcher(
                                     controller.selection.hovered.is_none() && row == selected_row;
 
                                 let mark_slot = {
-                                    let marks_guard = _marks.lock();
+                                    let marks_guard = marks.lock();
                                     let identity = crate::window::identity::WindowIdentity::from_window(win);
                                     marks_guard.store.find_slot(&identity)
                                 };
@@ -191,7 +211,8 @@ pub fn render_launcher(
     }
 
     if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
-        if let Some(win) = controller.active_window(filtered) {
+        // Enter commits the keyboard selection, not a stray hover.
+        if let Some(win) = controller.keyboard_window(filtered) {
             ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
             actions.push(LauncherAction::Commit(win.hwnd));
         }

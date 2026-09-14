@@ -28,31 +28,59 @@ pub const OVERLAY_SHADOW_BLEED: f32 = 8.0;
 
 pub const MARKS_CARD_WIDTH: f32 = 108.0;
 pub const MARKS_CARD_GAP: f32 = 6.0;
+/// Trailing slack at the end of the marks card row so the last card's frame
+/// stroke plus DPI rounding never gets clipped by the scroll area's clip rect.
+pub const MARKS_ROW_END_SLACK: f32 = 4.0;
 pub const MARKS_CARD_INNER_WIDTH: f32 = MARKS_CARD_WIDTH - 12.0;
 pub const MARKS_HEADER_HEIGHT: f32 = 18.0;
 pub const MARKS_CARD_HEIGHT: f32 = 56.0;
+/// Estimated height of the tips row + spacing above it in the marks switcher.
+pub const MARKS_TIPS_HEIGHT: f32 = 18.0;
 
 const PANEL_CORNER_RADIUS: u8 = 14;
 const CARD_CORNER_RADIUS: u8 = 8;
 
 pub fn overlay_viewport_size(content: egui::Vec2) -> egui::Vec2 {
+    // Edge slack: the viewport is sized exactly to measured content, so the
+    // frame stroke (drawn half outside the rect) plus sub-pixel/winit rounding
+    // would otherwise be clipped by the window edge. Transparent and invisible.
+    const EDGE_SLACK: f32 = 3.0;
     let bleed = OVERLAY_SHADOW_BLEED * 2.0;
-    content + egui::vec2(OVERLAY_INNER_MARGIN + bleed, OVERLAY_INNER_MARGIN + bleed)
+    content
+        + egui::vec2(
+            OVERLAY_INNER_MARGIN + bleed + EDGE_SLACK,
+            OVERLAY_INNER_MARGIN + bleed + EDGE_SLACK,
+        )
+}
+
+/// Full advance width of the marks card row, including trailing slack so the
+/// last card's frame stroke plus DPI rounding is never clipped. Single source
+/// of truth — the view and the size estimate must agree.
+pub fn marks_row_width(count: usize) -> f32 {
+    if count == 0 {
+        0.0
+    } else {
+        let count = count as f32;
+        count * MARKS_CARD_WIDTH + (count - 1.0) * MARKS_CARD_GAP + MARKS_ROW_END_SLACK
+    }
+}
+
+/// Outer content width for the row: floored so tiny counts still fill the
+/// panel, capped so the panel never exceeds the viewport (it scrolls inside).
+pub fn marks_row_outer_width(count: usize, max_width: f32) -> f32 {
+    marks_row_width(count).max(220.0).min(max_width)
 }
 
 pub fn marks_switcher_content_size(count: usize) -> egui::Vec2 {
     const PANEL_PADDING: f32 = 20.0;
-    let cards_width = if count == 0 {
-        0.0
-    } else {
-        let count = count as f32;
-        count * MARKS_CARD_WIDTH + (count - 1.0) * MARKS_CARD_GAP
-    };
+    // Uncapped estimate is fine here: capped_content_size clamps it to the
+    // monitor before positioning, and the measured size takes over after.
+    let cards_width = marks_row_width(count);
     let width = cards_width.max(220.0) + PANEL_PADDING;
     let height = if count == 0 {
         MARKS_HEADER_HEIGHT + PANEL_PADDING
     } else {
-        MARKS_HEADER_HEIGHT + 6.0 + MARKS_CARD_HEIGHT + PANEL_PADDING
+        MARKS_HEADER_HEIGHT + 6.0 + MARKS_CARD_HEIGHT + MARKS_TIPS_HEIGHT + PANEL_PADDING
     };
     egui::vec2(width, height)
 }
@@ -180,7 +208,7 @@ pub fn tray_menu_section_label(ui: &mut egui::Ui, text: &str) {
 }
 
 pub fn tray_menu_clipped_label(
-    ui: &mut egui::Ui,
+    ui: &egui::Ui,
     rect: egui::Rect,
     text: &str,
     size: f32,
@@ -225,7 +253,7 @@ pub fn render_overlay_shell<R>(
 ) -> (R, egui::Rect) {
     let mut result = None;
     let mut panel_rect = egui::Rect::NOTHING;
-    let margin = ((OVERLAY_INNER_MARGIN + OVERLAY_SHADOW_BLEED * 2.0) / 2.0) as i8;
+    let margin = f32::midpoint(OVERLAY_INNER_MARGIN, OVERLAY_SHADOW_BLEED * 2.0) as i8;
     egui::CentralPanel::default()
         .frame(
             egui::Frame::NONE
@@ -431,4 +459,54 @@ pub fn overlay_keyboard_hint_bar(ui: &mut egui::Ui, hints: &[(&str, &str)]) {
             });
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        marks_row_outer_width, marks_switcher_content_size, overlay_viewport_size,
+        MARKS_CARD_GAP, MARKS_CARD_WIDTH, MARKS_ROW_END_SLACK,
+    };
+
+    #[test]
+    fn switcher_width_fits_full_last_card() {
+        // Row width must leave slack past the last card so its frame stroke
+        // plus DPI rounding is never clipped by the scroll area.
+        for count in [1_usize, 2, 5, 9] {
+            let size = marks_switcher_content_size(count);
+            let row = count as f32 * MARKS_CARD_WIDTH
+                + (count as f32 - 1.0) * MARKS_CARD_GAP
+                + MARKS_ROW_END_SLACK;
+            let expected = row.max(220.0) + 20.0;
+            assert!(
+                (size.x - expected).abs() < f32::EPSILON,
+                "count={count}: width={} expected={expected}",
+                size.x
+            );
+        }
+    }
+
+    #[test]
+    fn viewport_leaves_edge_slack() {
+        // Viewport must be slightly larger than measured content so strokes
+        // and rounding are never cut by the window edge.
+        let content = eframe::egui::vec2(400.0, 200.0);
+        let viewport = overlay_viewport_size(content);
+        assert!(viewport.x > content.x);
+        assert!(viewport.y > content.y);
+        assert!((viewport.x - content.x - 3.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn outer_row_width_is_floored_and_capped() {
+        // Tiny counts still fill the panel; huge rows never exceed the viewport.
+        let floored = marks_row_outer_width(1, 1200.0);
+        assert!((floored - 220.0).abs() < f32::EPSILON);
+        let capped = marks_row_outer_width(9, 300.0);
+        assert!((capped - 300.0).abs() < f32::EPSILON);
+        let exact = marks_row_outer_width(2, 1200.0);
+        let expected =
+            2.0 * MARKS_CARD_WIDTH + MARKS_CARD_GAP + MARKS_ROW_END_SLACK;
+        assert!((exact - expected).abs() < f32::EPSILON);
+    }
 }

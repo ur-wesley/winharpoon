@@ -44,8 +44,7 @@ pub fn searchable_list_row(
             egui::Sense::click(),
         );
         if ui.is_rect_visible(rect) {
-            let mut text_left = rect.min.x;
-            if let Some(texture) = props.icon {
+            let text_left = props.icon.map_or(rect.min.x, |texture| {
                 let icon_rect = egui::Rect::from_center_size(
                     egui::pos2(rect.min.x + LIST_ICON_SIZE * 0.5, rect.center().y),
                     egui::vec2(LIST_ICON_SIZE, LIST_ICON_SIZE),
@@ -56,8 +55,8 @@ pub fn searchable_list_row(
                         .fit_to_exact_size(egui::vec2(LIST_ICON_SIZE, LIST_ICON_SIZE))
                         .corner_radius(4),
                 );
-                text_left = rect.min.x + LIST_ICON_SIZE + ICON_TEXT_GAP;
-            }
+                rect.min.x + LIST_ICON_SIZE + ICON_TEXT_GAP
+            });
             let mut text_right = rect.max.x;
             if props.is_favorite {
                 let star_size = 12.0;

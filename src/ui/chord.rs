@@ -67,6 +67,12 @@ pub fn egui_key_to_vk(key: egui::Key) -> u32 {
         egui::Key::Backtick => 0xC0,
         egui::Key::Minus => 0xBD,
         egui::Key::Equals => 0xBB,
+        egui::Key::Comma => 0xBC,
+        egui::Key::Period => 0xBE,
+        egui::Key::Slash => 0xBF,
+        egui::Key::Semicolon => 0xBA,
+        egui::Key::Quote => 0xDE,
+        egui::Key::Backslash => 0xDC,
         _ => 0,
     }
 }
@@ -143,4 +149,28 @@ pub fn poll_chord_capture(ctx: &egui::Context, use_win32_mods: bool) -> ChordCap
         }
     }
     ChordCaptureResult::Pending
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{chord_from_egui_key, egui_key_to_vk, mods_from_egui};
+
+    #[test]
+    fn punctuation_keys_map_to_oem_vks() {
+        assert_eq!(egui_key_to_vk(eframe::egui::Key::Comma), 0xBC);
+        assert_eq!(egui_key_to_vk(eframe::egui::Key::Period), 0xBE);
+        assert_eq!(egui_key_to_vk(eframe::egui::Key::Slash), 0xBF);
+        assert_eq!(egui_key_to_vk(eframe::egui::Key::Semicolon), 0xBA);
+        assert_eq!(egui_key_to_vk(eframe::egui::Key::Quote), 0xDE);
+        assert_eq!(egui_key_to_vk(eframe::egui::Key::Backslash), 0xDC);
+    }
+
+    #[test]
+    fn chord_builder_rejects_modifiers() {
+        let mods = eframe::egui::Modifiers::CTRL;
+        // Delete is unmapped (falls to `_ => 0`) so no chord is produced.
+        assert!(chord_from_egui_key(eframe::egui::Key::Delete, mods).is_none());
+        assert!(chord_from_egui_key(eframe::egui::Key::K, mods).is_some());
+        assert_eq!(mods_from_egui(mods), 0x0002);
+    }
 }

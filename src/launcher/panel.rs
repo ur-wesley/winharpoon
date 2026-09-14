@@ -82,8 +82,12 @@ impl LauncherPanel {
         }
 
         if dismiss_if_focus_lost(&ctx, self.lifecycle.open_frames) {
-            self.dismiss(&ctx, marks);
-            return;
+            // Usability: don't wipe a typed query on accidental Alt-Tab.
+            // Menus auto-dismiss, but the launcher keeps its query until Esc.
+            if self.controller.query.trim().is_empty() {
+                self.dismiss(&ctx, marks);
+                return;
+            }
         }
 
         if handle_escape(&ctx) {
