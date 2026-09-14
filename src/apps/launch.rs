@@ -17,6 +17,32 @@ use crate::util;
 
 use super::AppEntry;
 
+pub fn looks_like_shell_injection(args: &str) -> bool {
+    let lower = args.to_ascii_lowercase();
+    lower.contains('&')
+        || lower.contains('|')
+        || lower.contains(';')
+        || lower.contains("shell:")
+        || lower.contains("cmd ")
+        || lower.contains("/c ")
+        || lower.contains("powershell")
+}
+
+pub fn is_allowed_target(target: &Path) -> bool {
+    if target.as_os_str().is_empty() || !target.is_absolute() {
+        return false;
+    }
+    matches!(
+        target
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase()
+            .as_str(),
+        "exe" | "msi" | "bat" | "cmd"
+    )
+}
+
 pub fn launch(entry: &AppEntry) -> bool {
     if let Some(aumid) = &entry.aumid {
         if launch_aumid(aumid, &entry.args) {
@@ -64,16 +90,31 @@ fn shell_open(path: &Path) -> bool {
 }
 
 fn launch_detached(target: &Path, args: &str) -> bool {
-    if target.as_os_str().is_empty() {
+    // Security: only launch absolute paths with plausible executable extensions.
+    // Blocks cache/.lnk poisoning like target=evil.exe or target=doc.pdf.
+    if !is_allowed_target(target) {
+        log::warn(format!("apps: refusing target {}", target.display()));
         return false;
     }
-    let mut command = format!("\"{}\"", target.display());
+    // Security: warn on shell-metachar args from untrusted .lnk files.
+    // Still launches (compat) but makes injection visible in logs.
     let trimmed = args.trim();
-    if !trimmed.is_empty() {
-        command.push(' ');
-        command.push_str(trimmed);
+    if !trimmed.is_empty() && looks_like_shell_injection(trimmed) {
+        log::warn(format!(
+            "apps: suspicious args for {}: {trimmed}",
+            target.display()
+        ));
     }
-    let mut command_wide = util::wide(&command);
+    // Use application-name form of CreateProcessW so the exe path can't be
+    // reinterpreted as part of the command line (arg-injection hardening).
+    let target_wide = util::wide(&target.to_string_lossy());
+    let mut args_wide;
+    let cmd_ptr = if trimmed.is_empty() {
+        std::ptr::null_mut()
+    } else {
+        args_wide = util::wide(trimmed);
+        args_wide.as_mut_ptr()
+    };
     let working_dir = target
         .parent()
         .map(|p| util::wide(&p.to_string_lossy()))
@@ -87,22 +128,41 @@ fn launch_detached(target: &Path, args: &str) -> bool {
         let mut pi = PROCESS_INFORMATION::default();
         let flags =
             PROCESS_CREATION_FLAGS(CREATE_BREAKAWAY_FROM_JOB.0 | CREATE_UNICODE_ENVIRONMENT.0);
-        let result = CreateProcessW(
-            None,
-            Some(windows::core::PWSTR(command_wide.as_mut_ptr())),
-            None,
-            None,
-            false,
-            flags,
-            None,
-            if working_dir.is_empty() {
-                PCWSTR::null()
-            } else {
-                PCWSTR(working_dir.as_ptr())
-            },
-            &si,
-            &mut pi,
-        );
+        let result = if cmd_ptr.is_null() {
+            CreateProcessW(
+                PCWSTR(target_wide.as_ptr()),
+                None,
+                None,
+                None,
+                false,
+                flags,
+                None,
+                if working_dir.is_empty() {
+                    PCWSTR::null()
+                } else {
+                    PCWSTR(working_dir.as_ptr())
+                },
+                &si,
+                &mut pi,
+            )
+        } else {
+            CreateProcessW(
+                PCWSTR(target_wide.as_ptr()),
+                Some(windows::core::PWSTR(cmd_ptr)),
+                None,
+                None,
+                false,
+                flags,
+                None,
+                if working_dir.is_empty() {
+                    PCWSTR::null()
+                } else {
+                    PCWSTR(working_dir.as_ptr())
+                },
+                &si,
+                &mut pi,
+            )
+        };
         if result.is_ok() {
             let _ = CloseHandle(pi.hProcess);
             let _ = CloseHandle(pi.hThread);
@@ -115,8 +175,7 @@ fn launch_detached(target: &Path, args: &str) -> bool {
     }
 }
 
-fn launch_aumid(aumid: &str, args: &str) -> bool {
-    use windows::Win32::UI::Shell::IApplicationActivationManager;
+fn launch_aumid(aumid: &str, args: &str) -> bool {    use windows::Win32::UI::Shell::IApplicationActivationManager;
 
     let activator: IApplicationActivationManager = unsafe {
         match CoCreateInstance(
@@ -146,5 +205,29 @@ fn launch_aumid(aumid: &str, args: &str) -> bool {
         }
         log::debug(format!("apps: activated AUMID {aumid}"));
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_allowed_target, looks_like_shell_injection};
+    use std::path::Path;
+
+    #[test]
+    fn flags_shell_metachars() {
+        assert!(looks_like_shell_injection("/c payload"));
+        assert!(looks_like_shell_injection("a & b"));
+        assert!(looks_like_shell_injection("shell:appsfolder\\x"));
+        assert!(looks_like_shell_injection("powershell -e x"));
+        assert!(!looks_like_shell_injection("--new-window https://x"));
+    }
+
+    #[test]
+    fn rejects_relative_and_non_exe() {
+        assert!(!is_allowed_target(Path::new("evil.exe")));
+        assert!(!is_allowed_target(Path::new(r"C:\doc.pdf")));
+        assert!(!is_allowed_target(Path::new("")));
+        assert!(is_allowed_target(Path::new(r"C:\a\b.exe")));
+        assert!(is_allowed_target(Path::new(r"C:\a\b.bat")));
     }
 }

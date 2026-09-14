@@ -101,7 +101,7 @@ impl AppMenuPanel {
                 ChordCaptureResult::Captured(chord) => {
                     self.controller.handle_action(
                         AppMenuAction::SetFavoriteHotkey {
-                            id: id.clone(),
+                            id,
                             chord,
                         },
                         favorites,

@@ -14,26 +14,21 @@ use windows::Win32::UI::Shell::{
 use crate::log;
 use crate::util;
 
+use super::enumerate::entry_id;
 use super::{AppEntry, AppSource};
 
 pub fn scan() -> Vec<AppEntry> {
     let mut out: Vec<AppEntry> = Vec::new();
     let mut seen: HashMap<String, usize> = HashMap::new();
 
-    let root = match parse_apps_folder() {
-        Some(r) => r,
-        None => {
-            log::warn("apps: failed to bind shell:AppsFolder");
-            return out;
-        }
+    let Some(root) = parse_apps_folder() else {
+        log::warn("apps: failed to bind shell:AppsFolder");
+        return out;
     };
 
-    let folder: IShellFolder = match root.cast() {
-        Ok(f) => f,
-        Err(_) => {
-            log::warn("apps: failed to cast AppsFolder to IShellFolder");
-            return out;
-        }
+    let Ok(folder): Result<IShellFolder, _> = root.cast() else {
+        log::warn("apps: failed to cast AppsFolder to IShellFolder");
+        return out;
     };
 
     let mut enum_id_list: Option<IEnumIDList> = None;
@@ -42,9 +37,8 @@ pub fn scan() -> Vec<AppEntry> {
         log::warn("apps: EnumObjects failed");
         return out;
     }
-    let enum_id_list = match enum_id_list {
-        Some(e) => e,
-        None => return out,
+    let Some(enum_id_list) = enum_id_list else {
+        return out;
     };
 
     loop {
@@ -62,11 +56,8 @@ pub fn scan() -> Vec<AppEntry> {
         let item: Option<IShellItem> = unsafe { SHCreateItemFromIDList(pidl as *const _) }.ok();
         if let Some(item) = item {
             if let Some(entry) = build_entry(&item) {
-                let key = if let Some(a) = &entry.aumid {
-                    format!("aumid:{a}")
-                } else {
-                    format!("exe:{}", entry.target.to_string_lossy().to_ascii_lowercase())
-                };
+                // Same identity scheme as the merged index (entry.id).
+                let key = entry.id.clone();
                 if let Some(&idx) = seen.get(&key) {
                     if let Some(existing) = out.get_mut(idx) {
                         if entry.name.len() > existing.name.len() {
@@ -103,7 +94,7 @@ fn build_entry(item: &IShellItem) -> Option<AppEntry> {
 
     let (aumid, target) = classify(&parsing);
 
-    let id = make_id(target.as_path(), aumid.as_deref(), "");
+    let id = entry_id(target.as_path(), aumid.as_deref(), "");
 
     let exe_name = target
         .file_name()
@@ -152,26 +143,4 @@ fn read_display_name(item: &IShellItem, sigdn: SIGDN) -> Option<String> {
             Some(owned)
         }
     }
-}
-
-fn make_id(target: &std::path::Path, aumid: Option<&str>, args: &str) -> String {
-    let key = if let Some(a) = aumid {
-        format!("aumid:{a}")
-    } else {
-        format!(
-            "exe:{}|{}",
-            target.to_string_lossy().to_ascii_lowercase(),
-            args.trim()
-        )
-    };
-    format!("{:x}", fnv1a(&key))
-}
-
-fn fnv1a(s: &str) -> u64 {
-    let mut hash = 0xcbf29ce484222325u64;
-    for b in s.bytes() {
-        hash ^= b as u64;
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    hash
 }

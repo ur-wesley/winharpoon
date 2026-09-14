@@ -35,7 +35,7 @@ pub fn render_app_menu(
         ui,
         "app_menu_hints",
         &[
-            ("↑↓", "Navigate"),
+            ("Up/Down", "Navigate"),
             ("Enter", "Launch"),
             ("Ctrl+D", "Favorite"),
             ("Esc", "Close"),
@@ -46,7 +46,7 @@ pub fn render_app_menu(
                 ui,
                 &OverlayPanelHeaderProps {
                     title: "Apps",
-                    trailing: &format!("{} programs", controller.trailing_count()),
+                    trailing: &format!("{} programs", AppMenuController::trailing_count()),
                 },
             );
             ui.add_space(4.0);

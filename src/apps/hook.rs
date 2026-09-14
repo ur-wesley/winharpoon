@@ -14,7 +14,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::config::{Config, DoubleTapModifier};
-use crate::hotkeys::{hotkey_hwnd, WM_APP_MENU};
+use crate::hotkeys::hotkey_hwnd;
 use crate::log;
 use crate::window::foreground_is_fullscreen;
 
@@ -124,8 +124,7 @@ pub fn try_alt_double_tap(vk: u32, key_up: bool) {
     let modifier = STATE
         .lock()
         .as_ref()
-        .map(|s| s.config.modifier)
-        .unwrap_or(DoubleTapModifier::Alt);
+        .map_or(DoubleTapModifier::Alt, |s| s.config.modifier);
 
     let mut tracker = MOD_TAP_TRACKER.lock();
 
@@ -312,7 +311,7 @@ fn post_app_menu(x: i32, y: i32) {
         use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
         let _ = PostMessageW(
             Some(hwnd),
-            WM_APP_MENU,
+            crate::hotkeys::wm_app_menu(),
             WPARAM(x as usize),
             LPARAM(y as isize),
         );

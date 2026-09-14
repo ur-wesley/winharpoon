@@ -87,7 +87,7 @@ impl AppMenuController {
         (self.panel_width, self.panel_height)
     }
 
-    pub fn trailing_count(&self) -> String {
+    pub fn trailing_count() -> String {
         if is_ready() {
             entries().len().to_string()
         } else {
@@ -186,7 +186,7 @@ impl AppMenuController {
     }
 }
 
-pub(crate) fn build_app_rows(
+pub fn build_app_rows(
     query: &str,
     max_results: usize,
     all: &[AppEntry],
@@ -231,7 +231,7 @@ pub(crate) fn build_app_rows(
         .collect()
 }
 
-pub(crate) fn sort_ranked_favorites_first(
+pub fn sort_ranked_favorites_first(
     ranked: &mut [(usize, u32)],
     all: &[AppEntry],
     fav_set: &HashSet<&str>,
@@ -243,7 +243,7 @@ pub(crate) fn sort_ranked_favorites_first(
     });
 }
 
-pub(crate) fn clamp_selection(selected: &mut usize, row_count: usize) {
+pub fn clamp_selection(selected: &mut usize, row_count: usize) {
     if *selected >= row_count {
         *selected = 0;
     }

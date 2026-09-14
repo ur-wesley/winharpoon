@@ -158,10 +158,10 @@ pub fn open_menu(anchor: AppMenuAnchor) {
     crate::launcher::open_app_menu(anchor);
 }
 
-pub(crate) fn app_paths_scan() -> Vec<AppEntry> {
+pub fn app_paths_scan() -> Vec<AppEntry> {
     app_paths::scan()
 }
 
-pub(crate) fn apps_folder_scan() -> Vec<AppEntry> {
+pub fn apps_folder_scan() -> Vec<AppEntry> {
     apps_folder::scan()
 }

@@ -12,6 +12,7 @@ use windows::Win32::System::Registry::{
 use crate::log;
 use crate::util;
 
+use super::enumerate::{entry_id, expand_env};
 use super::{AppEntry, AppSource};
 
 const SUBKEY_PATH: &str = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths";
@@ -102,16 +103,18 @@ fn read_entry(parent: HKEY, name: &str) -> Option<AppEntry> {
     }
 
     let exe_path_clean = strip_quotes(&exe_path);
-    let exe_path_buf = PathBuf::from(&exe_path_clean);
+    // Registry values may contain unexpanded `%VAR%` paths; expand so the
+    // target is a real path and shares identity with other sources.
+    let exe_path_buf = PathBuf::from(expand_env(&exe_path_clean));
 
     let display_name = {
         let desc = file_description(&exe_path_buf);
-        if !desc.trim().is_empty() {
-            desc.trim().to_string()
-        } else {
+        if desc.trim().is_empty() {
             name.trim_end_matches(".exe")
                 .trim_end_matches(".EXE")
                 .to_string()
+        } else {
+            desc.trim().to_string()
         }
     };
 
@@ -119,13 +122,9 @@ fn read_entry(parent: HKEY, name: &str) -> Option<AppEntry> {
         return None;
     }
 
-    let id = format!(
-        "{:x}",
-        fnv1a(&format!(
-            "apppath:{}",
-            exe_path_clean.to_ascii_lowercase()
-        ))
-    );
+    // Same identity scheme as the other sources so the same exe merges
+    // instead of showing up twice (Start Menu shortcut + App Paths).
+    let id = entry_id(&exe_path_buf, None, "");
     let exe_name = exe_path_buf
         .file_name()
         .and_then(|s| s.to_str())
@@ -214,10 +213,7 @@ fn read_version_info_string(exe: &std::path::Path, field: &str) -> Option<String
     }
     let lang = u16::from_le(translations[0]);
     let code_page = u16::from_le(translations[1]);
-    let sub_block = format!(
-        "StringFileInfo\\{:04x}{:04x}\\{}",
-        lang, code_page, field
-    );
+    let sub_block = format!("StringFileInfo\\{lang:04x}{code_page:04x}\\{field}");
     let sub_wide = util::wide(&sub_block);
     let mut value_ptr = std::ptr::null_mut();
     let mut value_len = 0u32;
@@ -248,13 +244,4 @@ fn strip_quotes(s: &str) -> String {
     } else {
         trimmed.to_string()
     }
-}
-
-fn fnv1a(s: &str) -> u64 {
-    let mut hash = 0xcbf29ce484222325u64;
-    for b in s.bytes() {
-        hash ^= b as u64;
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    hash
 }

@@ -26,15 +26,24 @@ pub fn start_menu_roots() -> Vec<PathBuf> {
 }
 
 pub fn scan_all() -> Vec<AppEntry> {
+    let merged = merge_sources(vec![
+        apps_folder_scan(),
+        scan_start_menu(),
+        app_paths_scan(),
+    ]);
+    log::debug(format!("apps: indexed {} programs (merged)", merged.len()));
+    merged
+}
+
+fn merge_sources(parts: Vec<Vec<AppEntry>>) -> Vec<AppEntry> {
     let mut by_key: HashMap<String, usize> = HashMap::new();
     let mut out: Vec<AppEntry> = Vec::new();
 
-    merge_into(&mut out, &mut by_key, apps_folder_scan());
-    merge_into(&mut out, &mut by_key, scan_start_menu());
-    merge_into(&mut out, &mut by_key, app_paths_scan());
+    for part in parts {
+        merge_into(&mut out, &mut by_key, part);
+    }
 
-    out.sort_by(|a, b| a.name.to_ascii_lowercase().cmp(&b.name.to_ascii_lowercase()));
-    log::debug(format!("apps: indexed {} programs (merged)", out.len()));
+    out.sort_by_key(|a| a.name.to_ascii_lowercase());
     out
 }
 
@@ -76,9 +85,12 @@ fn scan_start_menu() -> Vec<AppEntry> {
 
     let mut out: Vec<AppEntry> = Vec::new();
     for lnk in links {
-        let Some((target, args)) = resolve_lnk(&lnk) else {
+        let Some((raw_target, args)) = resolve_lnk(&lnk) else {
             continue;
         };
+        // Shortcuts may store unexpanded `%VAR%` paths; expand so the target
+        // is a real path and matches other sources (e.g. App Paths).
+        let target = PathBuf::from(expand_env(&raw_target.to_string_lossy()));
         if target.as_os_str().is_empty() {
             continue;
         }
@@ -153,24 +165,62 @@ fn collect_links(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-pub(crate) fn entry_id(target: &Path, aumid: Option<&str>, args: &str) -> String {
-    let key = if let Some(a) = aumid {
-        format!("aumid:{a}")
-    } else {
-        format!(
-            "exe:{}|{}",
-            target.to_string_lossy().to_ascii_lowercase(),
-            args.trim()
-        )
-    };
+pub fn entry_id(target: &Path, aumid: Option<&str>, args: &str) -> String {
+    let key = aumid.map_or_else(
+        || format!("exe:{}|{}", normalize_target(target), args.trim()),
+        |a| format!("aumid:{}", a.trim().to_ascii_lowercase()),
+    );
     format!("{:x}", fnv1a(&key))
 }
 
-pub(crate) fn fnv1a(s: &str) -> u64 {
-    let mut hash = 0xcbf29ce484222325u64;
+/// Canonical form of a launch target for identity comparison.
+///
+/// Expands `%VAR%` segments, normalizes separators and case so the same
+/// executable discovered by different sources (Start Menu shortcut vs.
+/// App Paths registry value) maps to the same key.
+pub fn normalize_target(target: &Path) -> String {
+    let expanded = expand_env(&target.to_string_lossy());
+    expanded
+        .trim()
+        .trim_matches(|c| c == '"' || c == '\'')
+        .replace('/', "\\")
+        .to_ascii_lowercase()
+}
+
+/// Expands `%NAME%` segments using the process environment.
+/// Unknown names (or a dangling `%`) are left untouched.
+pub fn expand_env(s: &str) -> String {
+    if !s.contains('%') {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(start) = rest.find('%') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        let Some(end) = after.find('%') else {
+            out.push_str(&rest[start..]);
+            return out;
+        };
+        let name = &after[..end];
+        if let Ok(value) = std::env::var(name) {
+            out.push_str(&value);
+        } else {
+            out.push('%');
+            out.push_str(name);
+            out.push('%');
+        }
+        rest = &after[end + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+pub fn fnv1a(s: &str) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
     for b in s.bytes() {
         hash ^= b as u64;
-        hash = hash.wrapping_mul(0x100000001b3);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
     }
     hash
 }
@@ -199,5 +249,117 @@ fn resolve_lnk(path: &Path) -> Option<(PathBuf, String)> {
         link.GetArguments(&mut args_buf).ok()?;
         let args = util::from_wide(&args_buf);
         Some((target, args))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn test_entry(id: &str, name: &str, target: &str, args: &str, source: AppSource) -> AppEntry {
+        AppEntry {
+            id: id.into(),
+            name: name.into(),
+            target: PathBuf::from(target),
+            args: args.into(),
+            source_lnk: PathBuf::new(),
+            search_label: name.into(),
+            aumid: None,
+            source,
+        }
+    }
+
+    #[test]
+    fn same_exe_same_args_share_id_across_sources() {
+        // Start Menu and App Paths both describe chrome.exe with no args.
+        let a = entry_id(Path::new(r"C:\Program Files\App\app.exe"), None, "");
+        let b = entry_id(Path::new(r"C:\Program Files\App\app.exe"), None, "");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn identity_ignores_case_and_separators() {
+        let a = entry_id(Path::new(r"C:\Program Files\App\APP.EXE"), None, "");
+        let b = entry_id(Path::new("c:/program files/app/app.exe"), None, "");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn unexpanded_env_target_matches_expanded() {
+        let root = std::env::var("SystemRoot").expect("SystemRoot must exist on Windows");
+        let a = entry_id(
+            Path::new(r"%SystemRoot%\system32\notepad.exe"),
+            None,
+            "",
+        );
+        let b = entry_id(
+            Path::new(&format!("{root}\\system32\\notepad.exe")),
+            None,
+            "",
+        );
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn different_args_stay_distinct() {
+        let a = entry_id(Path::new(r"C:\Windows\system32\cmd.exe"), None, "/k one.bat");
+        let b = entry_id(Path::new(r"C:\Windows\system32\cmd.exe"), None, "/k other.bat");
+        let c = entry_id(Path::new(r"C:\Windows\system32\cmd.exe"), None, "");
+        assert_ne!(a, b);
+        assert_ne!(a, c);
+        assert_ne!(b, c);
+    }
+
+    #[test]
+    fn aumid_identity_is_case_insensitive() {
+        let a = entry_id(Path::new(""), Some("Microsoft.WindowsNotepad_8wekyb3d8bbwe!App"), "");
+        let b = entry_id(Path::new(""), Some("microsoft.windowsnotepad_8wekyb3d8bbwe!app"), "");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn merge_sources_collapses_same_exe() {
+        let chrome_lnk = test_entry(
+            &entry_id(Path::new(r"C:\Program Files\App\app.exe"), None, ""),
+            "App",
+            r"C:\Program Files\App\app.exe",
+            "",
+            AppSource::StartMenu,
+        );
+        let mut chrome_reg = chrome_lnk.clone();
+        chrome_reg.id = entry_id(Path::new(r"C:\Program Files\App\app.exe"), None, "");
+        chrome_reg.source = AppSource::AppPath;
+
+        let merged = merge_sources(vec![vec![chrome_lnk], vec![chrome_reg]]);
+        assert_eq!(merged.len(), 1);
+    }
+
+    #[test]
+    fn merge_sources_keeps_arg_variants() {
+        let one = test_entry(
+            &entry_id(Path::new(r"C:\Windows\system32\cmd.exe"), None, "/k one.bat"),
+            "One",
+            r"C:\Windows\system32\cmd.exe",
+            "/k one.bat",
+            AppSource::StartMenu,
+        );
+        let mut other = one.clone();
+        other.name = "Other".into();
+        other.args = "/k other.bat".into();
+        other.id = entry_id(Path::new(r"C:\Windows\system32\cmd.exe"), None, "/k other.bat");
+
+        let merged = merge_sources(vec![vec![one, other]]);
+        assert_eq!(merged.len(), 2);
+    }
+
+    #[test]
+    fn expand_env_leaves_unknown_vars_untouched() {
+        assert_eq!(
+            expand_env(r"%WINHARPOON_DEFINITELY_MISSING_VAR%\x"),
+            r"%WINHARPOON_DEFINITELY_MISSING_VAR%\x"
+        );
+        assert_eq!(expand_env(r"C:\plain\path.exe"), r"C:\plain\path.exe");
+        assert_eq!(expand_env("dangling%"), "dangling%");
     }
 }
