@@ -8,20 +8,54 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, PostMessageW, PostQuitMessage,
-    RegisterClassW, TranslateMessage, WM_DESTROY, WM_HOTKEY, WM_TIMER, WNDCLASSW, WS_OVERLAPPED,
+    RegisterClassW, TranslateMessage, WINDOW_EX_STYLE, WM_DESTROY, WM_HOTKEY, WM_TIMER, WNDCLASSW,
+    WS_OVERLAPPED,
 };
 
 use crate::app::AppState;
 use crate::config::{ConfigValidationError, HotkeyBinding};
 use crate::log;
+use crate::util;
 
 const CLASS_NAME: &str = "WinHarpoonHotkeyWindow";
-const WM_RELOAD: u32 = windows::Win32::UI::WindowsAndMessaging::WM_USER + 1;
-pub const WM_MARKS_KEY: u32 = windows::Win32::UI::WindowsAndMessaging::WM_USER + 2;
-pub const WM_JUMP_KEY: u32 = windows::Win32::UI::WindowsAndMessaging::WM_USER + 3;
-pub const WM_APP_MENU: u32 = windows::Win32::UI::WindowsAndMessaging::WM_USER + 4;
-const WM_QUIT_APP: u32 = windows::Win32::UI::WindowsAndMessaging::WM_USER + 5;
-pub const WM_LAUNCHER_KEY: u32 = windows::Win32::UI::WindowsAndMessaging::WM_USER + 6;
+// Security: registered messages (unique per session string) instead of
+// predictable WM_USER+n, so random same-session processes can't spoof
+// focus/launcher/jump commands via PostMessage.
+fn registered(id: &str) -> u32 {
+    use windows::Win32::UI::WindowsAndMessaging::RegisterWindowMessageW;
+    unsafe { RegisterWindowMessageW(windows::core::PCWSTR(util::wide(id).as_ptr())) }
+}
+
+pub fn wm_reload() -> u32 {
+    use std::sync::OnceLock;
+    static V: OnceLock<u32> = OnceLock::new();
+    *V.get_or_init(|| registered("WinHarpoon.Reload.v1"))
+}
+pub fn wm_marks_key() -> u32 {
+    use std::sync::OnceLock;
+    static V: OnceLock<u32> = OnceLock::new();
+    *V.get_or_init(|| registered("WinHarpoon.MarksKey.v1"))
+}
+pub fn wm_jump_key() -> u32 {
+    use std::sync::OnceLock;
+    static V: OnceLock<u32> = OnceLock::new();
+    *V.get_or_init(|| registered("WinHarpoon.JumpKey.v1"))
+}
+pub fn wm_app_menu() -> u32 {
+    use std::sync::OnceLock;
+    static V: OnceLock<u32> = OnceLock::new();
+    *V.get_or_init(|| registered("WinHarpoon.AppMenu.v1"))
+}
+fn wm_quit_app() -> u32 {
+    use std::sync::OnceLock;
+    static V: OnceLock<u32> = OnceLock::new();
+    *V.get_or_init(|| registered("WinHarpoon.Quit.v1"))
+}
+pub fn wm_launcher_key() -> u32 {
+    use std::sync::OnceLock;
+    static V: OnceLock<u32> = OnceLock::new();
+    *V.get_or_init(|| registered("WinHarpoon.LauncherKey.v1"))
+}
 pub const MARKS_POLL_TIMER_ID: usize = 9001;
 
 static HOTKEY_HWND: AtomicIsize = AtomicIsize::new(0);
@@ -74,7 +108,7 @@ impl HotkeyManager {
         {
             let mut s = state.lock();
             s.hotkey_conflicts = conflict_count;
-            s.registration_results = manager.results.clone();
+            s.registration_results.clone_from(&manager.results);
         }
         manager.report_conflicts();
         manager
@@ -88,7 +122,7 @@ impl HotkeyManager {
         {
             let mut s = state.lock();
             s.hotkey_conflicts = conflict_count;
-            s.registration_results = self.results.clone();
+            s.registration_results.clone_from(&self.results);
         }
         self.report_conflicts();
     }
@@ -189,12 +223,15 @@ impl HotkeyManager {
 
     pub fn run_message_loop(
         &mut self,
-        state: Arc<Mutex<AppState>>,
+        state: &Arc<Mutex<AppState>>,
         on_action: impl Fn(HotkeyAction, &Arc<Mutex<AppState>>),
         on_reload: impl Fn(&mut Self, &Arc<Mutex<AppState>>),
         on_poll: impl Fn(),
     ) {
         log::debug("entering hotkey message loop");
+        // Resolve once: RegisterWindowMessage returns the same id per string.
+        let wm_reload = wm_reload();
+        let wm_quit = wm_quit_app();
         unsafe {
             let mut msg = std::mem::zeroed();
             while GetMessageW(&mut msg, None, 0, 0).as_bool() {
@@ -202,14 +239,14 @@ impl HotkeyManager {
                     let id = msg.wParam.0 as i32;
                     if let Some(action) = self.id_map.get(&id).copied() {
                         log::debug(format!("WM_HOTKEY id={id} action={action:?}"));
-                        on_action(action, &state);
+                        on_action(action, state);
                     } else {
                         log::warn(format!("WM_HOTKEY unknown id={id}"));
                     }
-                } else if msg.message == WM_RELOAD {
+                } else if msg.message == wm_reload {
                     log::debug("WM_RELOAD received");
-                    on_reload(self, &state);
-                } else if msg.message == WM_QUIT_APP {
+                    on_reload(self, state);
+                } else if msg.message == wm_quit {
                     log::debug("WM_QUIT_APP received");
                     break;
                 }
@@ -226,7 +263,7 @@ pub fn post_reload() {
     log::debug(format!("post_reload hwnd={hwnd}"));
     if hwnd != 0 {
         unsafe {
-            let _ = PostMessageW(Some(HWND(hwnd as *mut _)), WM_RELOAD, WPARAM(0), LPARAM(0));
+            let _ = PostMessageW(Some(HWND(hwnd as *mut _)), wm_reload(), WPARAM(0), LPARAM(0));
         }
     }
 }
@@ -245,7 +282,7 @@ pub fn post_quit() {
     log::debug(format!("post_quit hwnd={hwnd}"));
     if hwnd != 0 {
         unsafe {
-            let _ = PostMessageW(Some(HWND(hwnd as *mut _)), WM_QUIT_APP, WPARAM(0), LPARAM(0));
+            let _ = PostMessageW(Some(HWND(hwnd as *mut _)), wm_quit_app(), WPARAM(0), LPARAM(0));
         }
     } else {
         unsafe {
@@ -291,7 +328,7 @@ unsafe fn create_message_window() -> HWND {
     RegisterClassW(&wc);
 
     CreateWindowExW(
-        Default::default(),
+        WINDOW_EX_STYLE::default(),
         windows::core::PCWSTR(class_name.as_ptr()),
         windows::core::PCWSTR(class_name.as_ptr()),
         WS_OVERLAPPED,
@@ -322,22 +359,23 @@ unsafe extern "system" fn window_proc(
         crate::marks_switcher::hook::poll_active();
         return LRESULT(0);
     }
-    if msg == WM_MARKS_KEY {
+    // Registered messages: exact-id match, no WM_USER overlap with other apps.
+    if msg == wm_marks_key() {
         let vk = wparam.0 as u32;
         let key_up = lparam.0 != 0;
         crate::marks_switcher::hook::dispatch_key(vk, key_up);
         return LRESULT(0);
     }
-    if msg == WM_JUMP_KEY {
+    if msg == wm_jump_key() {
         let slot = wparam.0 as u8;
         crate::marks_switcher::hook::dispatch_jump(slot);
         return LRESULT(0);
     }
-    if msg == WM_LAUNCHER_KEY {
+    if msg == wm_launcher_key() {
         crate::launcher::open();
         return LRESULT(0);
     }
-    if msg == WM_APP_MENU {
+    if msg == wm_app_menu() {
         let x = wparam.0 as i32;
         let y = lparam.0 as i32;
         crate::apps::hook::dispatch_app_menu(x, y);

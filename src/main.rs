@@ -33,6 +33,7 @@ use crate::tray::init_tray;
 const SINGLE_INSTANCE_MUTEX: &str = "WinHarpoon_SingleInstance";
 
 fn main() {
+    harden_dll_search();
     paths::ensure_app_data();
     log::init_toast();
 
@@ -61,14 +62,15 @@ fn main() {
     let marks = shared_marks();
     let favorites = apps::shared_favorites();
     let state = Arc::new(Mutex::new(AppState::new(config.clone(), marks.clone(), favorites)));
-    marks_switcher::init(marks.clone(), config.clone());
+    marks_switcher::init(marks.clone(), &config);
     launcher::init(config.clone(), state.clone(), marks);
     apps::init();
     apps::hook::reload(&config.lock());
     log::debug("app state initialized");
 
     let favorite_bindings = state.lock().favorites.lock().hotkey_bindings();
-    let bindings = match config.lock().validate_merged(&favorite_bindings) {
+    let validation = config.lock().validate_merged(&favorite_bindings);
+    let bindings = match validation {
         Ok(bindings) => {
             log::debug(format!("config validated, {} bindings", bindings.len()));
             bindings
@@ -87,11 +89,11 @@ fn main() {
 
     let hotkey_manager = HotkeyManager::register(&state, &bindings);
     let hotkeys = Arc::new(Mutex::new(hotkey_manager));
-    let _tray = init_tray(state.clone());
+    let _tray = init_tray(&state);
     log::debug("tray icon initialized, entering message loop");
 
     hotkeys.lock().run_message_loop(
-        state.clone(),
+        &state,
         dispatch_action,
         |manager, state| {
             reload_hotkeys(manager, state);
@@ -149,10 +151,24 @@ fn acquire_single_instance() -> bool {
                 return false;
             }
             log::debug(format!("CreateMutexW handle: {:?}", handle.0));
+            // NOTE: HANDLE is Copy; dropping the value does NOT close the kernel
+            // handle, so the mutex stays held until process exit. Do not CloseHandle here.
+            let _ = handle;
             true
         } else {
             log::error("CreateMutexW failed");
             false
         }
+    }
+}
+
+/// DLL hijack hardening: only load system DLLs from System32.
+#[allow(non_snake_case)]
+fn harden_dll_search() {
+    use windows::Win32::System::LibraryLoader::{
+        SetDefaultDllDirectories, LOAD_LIBRARY_SEARCH_SYSTEM32,
+    };
+    unsafe {
+        let _ = SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32);
     }
 }
