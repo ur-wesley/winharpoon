@@ -36,7 +36,7 @@ impl TrayMenuController {
         self.visible = false;
     }
 
-    pub fn menu_height(&self) -> f32 {
+    pub fn menu_height() -> f32 {
         const HEADER_HEIGHT: f32 = 28.0;
         const DIVIDER_HEIGHT: f32 = 5.0;
         const ROW_HEIGHT: f32 = 26.0;

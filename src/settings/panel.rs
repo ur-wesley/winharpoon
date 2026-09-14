@@ -74,7 +74,7 @@ impl SettingsPanel {
                 ChordCaptureResult::Captured(chord) => {
                     self.controller.handle_action(
                         SettingsAction::FinishCapture {
-                            label: label.clone(),
+                            label,
                             chord,
                         },
                         config,

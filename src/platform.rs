@@ -226,10 +226,10 @@ pub fn monitor_work_area_at_physical_point(
         )
     } else {
         ctx.input(|i| {
-            i.viewport()
-                .monitor_size
-                .map(|size| egui::Rect::from_min_size(egui::Pos2::ZERO, size))
-                .unwrap_or_else(|| ctx.content_rect())
+            i.viewport().monitor_size.map_or_else(
+                || ctx.content_rect(),
+                |size| egui::Rect::from_min_size(egui::Pos2::ZERO, size),
+            )
         })
     }
 }
@@ -242,10 +242,10 @@ pub fn monitor_work_area_at_physical_point(
 ) -> eframe::egui::Rect {
     use eframe::egui;
     ctx.input(|i| {
-        i.viewport()
-            .monitor_size
-            .map(|size| egui::Rect::from_min_size(egui::Pos2::ZERO, size))
-            .unwrap_or_else(|| ctx.content_rect())
+        i.viewport().monitor_size.map_or_else(
+            || ctx.content_rect(),
+            |size| egui::Rect::from_min_size(egui::Pos2::ZERO, size),
+        )
     })
 }
 

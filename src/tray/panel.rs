@@ -115,13 +115,13 @@ impl TrayMenuPanel {
     }
 
     fn position_viewport(&self, ctx: &egui::Context) {
-        let content = if self.measured_size != egui::Vec2::ZERO {
-            self.measured_size
-        } else {
+        let content = if self.measured_size == egui::Vec2::ZERO {
             egui::vec2(
                 self.controller.panel_width,
-                self.controller.menu_height(),
+                TrayMenuController::menu_height(),
             )
+        } else {
+            self.measured_size
         };
         let menu_rect = self.controller.menu_screen_rect(ctx, content);
         position_overlay_at(ctx, menu_rect.min, menu_rect.size());

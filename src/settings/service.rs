@@ -42,7 +42,7 @@ impl SettingsService {
     }
 
     pub fn apply_autostart(enabled: bool) -> Result<(), String> {
-        crate::autostart::apply(enabled).map_err(|e| e.to_string())
+        crate::autostart::apply(enabled)
     }
 }
 

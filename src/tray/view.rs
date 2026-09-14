@@ -42,7 +42,7 @@ pub fn render_tray_menu(
         String::new()
     };
 
-    let (_, panel_rect) = native_ui::render_overlay_shell(ui, |ui| {
+    let ((), panel_rect) = native_ui::render_overlay_shell(ui, |ui| {
         ui.set_width(MENU_WIDTH);
         overlay_panel_header(
             ui,

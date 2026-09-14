@@ -6,6 +6,7 @@ use windows::Win32::Graphics::Gdi::{
     CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits,
     ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HGDIOBJ,
 };
+use windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES;
 use windows::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON};
 use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, DrawIconEx, DI_NORMAL, HICON};
 
@@ -20,7 +21,7 @@ pub fn extract_file_icon(path: &Path, size: u32) -> Option<ColorImage> {
     unsafe {
         let _ = SHGetFileInfoW(
             PCWSTR(wide.as_ptr()),
-            Default::default(),
+            FILE_FLAGS_AND_ATTRIBUTES::default(),
             Some(&mut shfi),
             std::mem::size_of::<SHFILEINFOW>() as u32,
             SHGFI_ICON | SHGFI_LARGEICON,

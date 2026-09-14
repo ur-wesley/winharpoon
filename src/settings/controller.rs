@@ -143,7 +143,6 @@ impl SettingsController {
     }
 
     pub fn registration_map(
-        &self,
         state: &Arc<Mutex<AppState>>,
     ) -> HashMap<String, HotkeyRegistrationResult> {
         state

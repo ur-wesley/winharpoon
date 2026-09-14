@@ -1,6 +1,8 @@
 use egui::{Color32, Painter, Rect, RichText, Ui};
 use egui_material_icons::icon_text;
-use egui_material_icons::icons::*;
+use egui_material_icons::icons::{
+    ICON_FOLDER_OPEN, ICON_POWER_SETTINGS_NEW, ICON_REFRESH, ICON_SEARCH, ICON_SETTINGS,
+};
 
 pub fn init(ctx: &egui::Context) {
     egui_material_icons::initialize(ctx);

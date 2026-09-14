@@ -200,7 +200,7 @@ impl eframe::App for UiApp {
 
             .as_ref()
 
-            .is_some_and(|s| s.is_visible());
+            .is_some_and(MarksSwitcherPanel::is_visible);
 
 
 

@@ -12,10 +12,10 @@ use crate::app::AppState;
 use crate::launcher::{open_tray_menu, TrayClickInfo};
 use crate::log;
 
-pub fn init_tray(state: Arc<Mutex<AppState>>) -> TrayIcon {
+pub fn init_tray(state: &Arc<Mutex<AppState>>) -> TrayIcon {
     log::debug("init_tray");
     let icon = tray_icon().expect("tray icon");
-    let tooltip = tray_tooltip(&state);
+    let tooltip = tray_tooltip(state);
 
     let tray = TrayIconBuilder::new()
         .with_tooltip(tooltip)
@@ -25,7 +25,6 @@ pub fn init_tray(state: Arc<Mutex<AppState>>) -> TrayIcon {
 
     tray.set_show_menu_on_left_click(false);
     log::debug("tray icon created");
-    let _ = state;
     tray
 }
 

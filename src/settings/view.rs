@@ -28,7 +28,7 @@ pub fn render_settings(
     let mut actions = Vec::new();
     let mut capture_ui_used = false;
     let panel_fill = native_ui::GLASS_PANEL;
-    let registrations = controller.registration_map(state);
+    let registrations = SettingsController::registration_map(state);
     let conflicts = state.lock().hotkey_conflicts;
 
     egui::Panel::bottom("settings_footer")
