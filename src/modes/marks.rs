@@ -32,6 +32,27 @@ pub fn filled_entries(store: &MarksStore) -> Vec<MarkEntry> {
         .collect()
 }
 
+pub fn switcher_entries(store: &MarksStore) -> Vec<MarkEntry> {
+    filled_entries(store)
+}
+
+// Reserved helper for switcher selection; covered by unit test.
+#[allow(dead_code)]
+pub fn index_after_foreground(entries: &[MarkEntry]) -> usize {
+    if entries.is_empty() {
+        return 0;
+    }
+    let fg = get_foreground_window();
+    let current_idx = fg.and_then(|fg_win| {
+        entries.iter().position(|e| {
+            e.window
+                .as_ref()
+                .is_some_and(|w| w.hwnd == fg_win.hwnd)
+        })
+    });
+    current_idx.unwrap_or_default()
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct MarksStore {
     #[serde(default)]
@@ -59,6 +80,10 @@ impl MarksStore {
         Self::default()
     }
 
+    // `save` only borrows in non-test builds; in `cfg(test)` it is a no-op.
+    // Allow `unused_self`/`unnecessary_wraps` for the test build to keep the
+    // same signature/behavior across cfgs.
+    #[allow(clippy::unused_self, clippy::unnecessary_wraps)]
     pub fn save(&self) -> std::io::Result<()> {
         #[cfg(test)]
         {
@@ -70,7 +95,7 @@ impl MarksStore {
             let path = paths::marks_path();
             log::debug(format!("MarksStore::save to {} ({} slots)", path.display(), self.slots.len()));
             let text = toml::to_string_pretty(self).expect("serialize marks");
-            fs::write(path, text)
+            paths::atomic_write(&path, &text)
         }
     }
 
@@ -80,7 +105,8 @@ impl MarksStore {
         let identity = WindowIdentity::from_window(&current);
         self.slots.insert(slot.to_string(), identity.clone());
         let _ = self.save();
-        log::info(format!("marked slot {slot}: {}", identity.display_label()));
+        // Security: log exe only, not full window title.
+        log::info(format!("marked slot {slot}: {}", current.process_name));
         Some(identity)
     }
 
@@ -103,8 +129,7 @@ impl MarksStore {
     pub fn slot_label(&self, slot: u8) -> String {
         self.slots
             .get(&slot.to_string())
-            .map(|id| id.display_label())
-            .unwrap_or_else(|| "empty".into())
+            .map_or_else(|| "empty".into(), WindowIdentity::display_label)
     }
 
     pub fn find_slot(&self, identity: &WindowIdentity) -> Option<u8> {
@@ -333,5 +358,20 @@ mod tests {
         assert!(!store.move_mark_slot(2, true));
         assert!(!store.move_mark_slot(2, false));
         assert!(!store.move_mark_slot(9, true));
+    }
+
+    #[test]
+    fn cycle_mark_empty_is_false() {
+        let mut state = MarksState {
+            store: MarksStore::default(),
+            cycle_index: 0,
+            mru_slots: Vec::new(),
+        };
+        assert!(!state.cycle_mark(true));
+    }
+
+    #[test]
+    fn index_after_foreground_empty_is_zero() {
+        assert_eq!(index_after_foreground(&[]), 0);
     }
 }

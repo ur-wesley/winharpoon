@@ -57,19 +57,31 @@ pub fn dispatch_action(action: HotkeyAction, state: &Arc<Mutex<AppState>>) {
     log::debug(format!("dispatch_action: {action:?}"));
     match action {
         HotkeyAction::Launcher => launcher::open(),
-        HotkeyAction::SameAppNext => same_app::cycle_same_app(true),
-        HotkeyAction::SameAppPrev => same_app::cycle_same_app(false),
+        HotkeyAction::SameAppNext | HotkeyAction::SameAppPrev => {
+            let forward = action == HotkeyAction::SameAppNext;
+            match same_app::cycle_same_app(forward) {
+                same_app::CycleResult::Cycled => {}
+                same_app::CycleResult::NoForeground => {
+                    log::notify("WinHarpoon", "No window to cycle from");
+                }
+                same_app::CycleResult::SingleWindow(app) => {
+                    log::notify("WinHarpoon", &format!("Only one {app} window"));
+                }
+            }
+        }
         HotkeyAction::MarkNext => {
             let state_guard = state.lock();
             let mut marks = state_guard.marks.lock();
-            let ok = marks.cycle_mark(true);
-            log::debug(format!("mark cycle next: {ok}"));
+            if !marks.cycle_mark(true) {
+                log::notify("WinHarpoon", "No marked windows to cycle");
+            }
         }
         HotkeyAction::MarkPrev => {
             let state_guard = state.lock();
             let mut marks = state_guard.marks.lock();
-            let ok = marks.cycle_mark(false);
-            log::debug(format!("mark cycle prev: {ok}"));
+            if !marks.cycle_mark(false) {
+                log::notify("WinHarpoon", "No marked windows to cycle");
+            }
         }
         HotkeyAction::ToggleMark => {
             crate::marks_switcher::cancel_if_active();
@@ -106,7 +118,7 @@ pub fn dispatch_action(action: HotkeyAction, state: &Arc<Mutex<AppState>>) {
             if let Some(id) = marks.store.mark_slot(slot) {
                 log::info(format!("marked slot {slot}: {}", id.display_label()));
             } else {
-                log::warn(format!("mark slot {slot}: no foreground window"));
+                log::notify("WinHarpoon", "No window to mark");
             }
         }
         HotkeyAction::Jump(slot) => {
@@ -115,7 +127,7 @@ pub fn dispatch_action(action: HotkeyAction, state: &Arc<Mutex<AppState>>) {
             if marks.store.jump_slot(slot) {
                 log::debug(format!("jump slot {slot}: ok"));
             } else {
-                log::warn(format!("jump slot {slot}: missed"));
+                log::notify("WinHarpoon", &format!("Slot {slot} is empty or closed"));
             }
         }
         HotkeyAction::MarksSwitcherNext | HotkeyAction::MarksSwitcherPrev => {}
@@ -123,7 +135,7 @@ pub fn dispatch_action(action: HotkeyAction, state: &Arc<Mutex<AppState>>) {
             let state_guard = state.lock();
             let favs = state_guard.favorites.lock();
             if !apps::launch_favorite_index(idx, &favs) {
-                log::warn(format!("launch favorite {idx}: missed"));
+                log::notify("WinHarpoon", "Could not launch favorite");
             }
         }
     }

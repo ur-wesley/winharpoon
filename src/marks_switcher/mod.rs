@@ -23,7 +23,7 @@ pub enum SwitcherUiCommand {
 static UI_TX: OnceLock<Sender<SwitcherUiCommand>> = OnceLock::new();
 static UI_RX: OnceLock<Mutex<Option<Receiver<SwitcherUiCommand>>>> = OnceLock::new();
 
-pub fn init(marks: SharedMarks, config: Arc<Mutex<Config>>) {
+pub fn init(marks: SharedMarks, config: &Arc<Mutex<Config>>) {
     let (tx, rx) = std::sync::mpsc::channel();
     let _ = UI_TX.set(tx);
     let _ = UI_RX.set(Mutex::new(Some(rx)));

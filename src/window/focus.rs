@@ -6,7 +6,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     BringWindowToTop, EnumWindows, GetForegroundWindow, GetWindowThreadProcessId, IsIconic,
-    IsWindowVisible, SetForegroundWindow, SetWindowPos, ShowWindow, HWND_TOP, SW_RESTORE,
+    IsWindow, IsWindowVisible, SetForegroundWindow, SetWindowPos, ShowWindow, HWND_TOP, SW_RESTORE,
     SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
 };
 
@@ -16,6 +16,10 @@ use crate::log;
 pub struct StackSnapshot {
     pub foreground: Option<isize>,
     pub z_order: Vec<isize>,
+    /// HWNDs that were minimized before preview — restored to minimized on cancel.
+    /// Usability: preview un-minimizes windows; cancel must not leave them restored.
+    #[allow(dead_code)]
+    pub minimized: Vec<isize>,
 }
 
 pub fn capture_stack_snapshot() -> StackSnapshot {
@@ -34,14 +38,34 @@ pub fn capture_stack_snapshot() -> StackSnapshot {
             Some(fg.0 as isize)
         }
     };
+    let minimized = z_order
+        .iter()
+        .copied()
+        .filter(|&hwnd_raw| {
+            let hwnd = HWND(hwnd_raw as *mut _);
+            unsafe { IsIconic(hwnd).as_bool() }
+        })
+        .collect();
     StackSnapshot {
         foreground,
         z_order,
+        minimized,
     }
 }
 
 pub fn restore_stack_snapshot(snapshot: &StackSnapshot) {
     restore_z_order(&snapshot.z_order);
+    // Re-minimize windows that preview restored.
+    unsafe {
+        use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_MINIMIZE};
+        for &hwnd_raw in &snapshot.minimized {
+            let hwnd = HWND(hwnd_raw as *mut _);
+            if hwnd.0.is_null() || !IsWindow(Some(hwnd)).as_bool() {
+                continue;
+            }
+            let _ = ShowWindow(hwnd, SW_MINIMIZE);
+        }
+    }
     if let Some(hwnd) = snapshot.foreground {
         focus_window_impl(hwnd, false);
     }
@@ -125,6 +149,11 @@ fn focus_window_impl(hwnd_raw: isize, log_result: bool) -> bool {
         return false;
     }
     unsafe {
+        // Usability: stale marks/launcher entries fail silently without this.
+        if !IsWindow(Some(hwnd)).as_bool() {
+            log::warn(format!("focus_window: stale hwnd={hwnd_raw}"));
+            return false;
+        }
         if IsIconic(hwnd).as_bool() {
             log::debug(format!("focus_window: restoring minimized hwnd={hwnd_raw}"));
             let _ = ShowWindow(hwnd, SW_RESTORE);

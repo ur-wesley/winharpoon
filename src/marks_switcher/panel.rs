@@ -45,10 +45,10 @@ impl MarksSwitcherController {
 }
 
 fn capped_content_size(ctx: &egui::Context, measured: egui::Vec2, entry_count: usize) -> egui::Vec2 {
-    let content = if measured != egui::Vec2::ZERO {
-        measured
-    } else {
+    let content = if measured == egui::Vec2::ZERO {
         native_ui::marks_switcher_content_size(entry_count)
+    } else {
+        measured
     };
     let max_width = ctx
         .input(|i| i.viewport().monitor_size.map(|s| s.x * 0.9))

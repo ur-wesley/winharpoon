@@ -18,15 +18,17 @@ impl WindowIdentity {
     }
 
     pub fn display_label(&self) -> String {
-        let exe = self
-            .exe
-            .file_name()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_else(|| self.exe.display().to_string());
+        let exe = self.exe.file_name().map_or_else(
+            || self.exe.display().to_string(),
+            |s| s.to_string_lossy().into_owned(),
+        );
         format!("{} — {exe}", self.title)
     }
 }
 
+// Allow: `WindowIdentity.exe` vs `WindowInfo.exe_path` are different field names
+// for the same concept (stored exe path), not a copy-paste bug.
+#[allow(clippy::suspicious_operation_groupings)]
 pub fn resolve_identity<'a>(
     identity: &WindowIdentity,
     windows: &'a [WindowInfo],
@@ -81,4 +83,49 @@ fn title_score(candidate: &str, target: &str) -> i32 {
         return 25;
     }
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{resolve_identity, title_score, WindowIdentity};
+    use crate::window::WindowInfo;
+    use std::path::PathBuf;
+
+    fn win(hwnd: isize, exe: &str, title: &str) -> WindowInfo {
+        WindowInfo {
+            hwnd,
+            title: title.into(),
+            exe_path: PathBuf::from(exe),
+            exe_name: exe.rsplit('\\').next().unwrap_or(exe).into(),
+            process_name: "p".into(),
+        }
+    }
+
+    fn id(exe: &str, title: &str) -> WindowIdentity {
+        WindowIdentity {
+            exe: PathBuf::from(exe),
+            title: title.into(),
+        }
+    }
+
+    #[test]
+    fn exact_match_wins() {
+        let wins = vec![win(1, r"C:\a.exe", "Doc"), win(2, r"C:\b.exe", "Doc")];
+        assert_eq!(resolve_identity(&id(r"C:\a.exe", "Doc"), &wins).map(|w| w.hwnd), Some(1));
+    }
+
+    #[test]
+    fn fuzzy_filename_match_needs_title_score() {
+        let wins = vec![win(1, r"C:\x\app.exe", "Quarterly Report - Word")];
+        assert!(resolve_identity(&id(r"D:\y\APP.exe", "Quarterly Report"), &wins).is_some());
+        assert!(resolve_identity(&id(r"D:\y\APP.exe", "Unrelated"), &wins).is_none());
+    }
+
+    #[test]
+    fn title_score_tiers() {
+        assert_eq!(title_score("abc", "abc"), 100);
+        assert_eq!(title_score("abcdef", "abc"), 50);
+        assert_eq!(title_score("XABCx", "abc"), 25);
+        assert_eq!(title_score("xyz", "abc"), 0);
+    }
 }

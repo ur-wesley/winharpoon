@@ -1,11 +1,18 @@
 use crate::log;
 use crate::window::{enumerate_windows, focus, get_foreground_window, WindowInfo};
 
-pub fn cycle_same_app(forward: bool) {
+pub enum CycleResult {
+    Cycled,
+    NoForeground,
+    SingleWindow(String),
+}
+
+/// Returns outcome so callers can toast instead of appearing dead (usability).
+pub fn cycle_same_app(forward: bool) -> CycleResult {
     log::debug(format!("cycle_same_app forward={forward}"));
     let Some(current) = get_foreground_window() else {
         log::debug("cycle_same_app: no foreground window");
-        return;
+        return CycleResult::NoForeground;
     };
 
     let mut group: Vec<WindowInfo> = enumerate_windows(None)
@@ -19,7 +26,7 @@ pub fn cycle_same_app(forward: bool) {
             group.len(),
             current.exe_name
         ));
-        return;
+        return CycleResult::SingleWindow(current.exe_name);
     }
 
     group.sort_by_key(|w| w.hwnd);
@@ -36,10 +43,13 @@ pub fn cycle_same_app(forward: bool) {
         "cycle_same_app: {} -> {} (idx {idx} -> {next_idx} of {})",
         current.title, next.title, group.len()
     ));
-    focus::focus_window(next.hwnd);
+    if !focus::focus_window(next.hwnd) {
+        return CycleResult::SingleWindow(current.exe_name);
+    }
+    CycleResult::Cycled
 }
 
-fn same_group(current: &WindowInfo, candidate: &WindowInfo) -> bool {
+pub fn same_group(current: &WindowInfo, candidate: &WindowInfo) -> bool {
     if current.exe_path == candidate.exe_path {
         return true;
     }
@@ -51,8 +61,52 @@ fn same_group(current: &WindowInfo, candidate: &WindowInfo) -> bool {
     false
 }
 
-fn title_prefix_match(a: &str, b: &str) -> bool {
+pub fn title_prefix_match(a: &str, b: &str) -> bool {
     let a = a.split(" - ").next().unwrap_or(a);
     let b = b.split(" - ").next().unwrap_or(b);
     a.eq_ignore_ascii_case(b)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{same_group, title_prefix_match};
+    use crate::window::WindowInfo;
+    use std::path::PathBuf;
+
+    fn win(exe: &str, title: &str) -> WindowInfo {
+        WindowInfo {
+            hwnd: 1,
+            title: title.into(),
+            exe_path: PathBuf::from(exe),
+            exe_name: exe.rsplit('\\').next().unwrap_or(exe).into(),
+            process_name: "p".into(),
+        }
+    }
+
+    #[test]
+    fn same_exe_path_groups() {
+        let a = win(r"C:\a\app.exe", "one");
+        let b = win(r"C:\a\app.exe", "two");
+        assert!(same_group(&a, &b));
+    }
+
+    #[test]
+    fn shell_host_needs_prefix_match() {
+        // Same install path groups immediately (current behavior).
+        let mail_inbox = win("ApplicationFrameHost.exe", "Mail - Inbox");
+        let mail_drafts = win("ApplicationFrameHost.exe", "Mail - Drafts");
+        assert!(same_group(&mail_inbox, &mail_drafts));
+        // Title-prefix check applies when same exe name lives at different paths.
+        let path_c = win(r"C:\w\ApplicationFrameHost.exe", "Mail - Inbox");
+        let path_d = win(r"D:\w\ApplicationFrameHost.exe", "Mail - Drafts");
+        assert!(same_group(&path_c, &path_d));
+        let cal = win(r"D:\w\ApplicationFrameHost.exe", "Calendar - Today");
+        assert!(!same_group(&path_c, &cal));
+    }
+
+    #[test]
+    fn prefix_match_is_case_insensitive() {
+        assert!(title_prefix_match("Mail - x", "mail - y"));
+        assert!(!title_prefix_match("Mail - x", "Cal - y"));
+    }
 }

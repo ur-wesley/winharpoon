@@ -16,10 +16,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::config::{parse_chord, parse_hold_chord, Config, HoldChord};
-use crate::hotkeys::{hotkey_hwnd, MARKS_POLL_TIMER_ID, WM_JUMP_KEY, WM_MARKS_KEY};
+use crate::hotkeys::{hotkey_hwnd, MARKS_POLL_TIMER_ID};
 use crate::log;
 use crate::marks_switcher::{ui_sender, SwitcherUiCommand};
-use crate::modes::marks::SharedMarks;
+use crate::modes::marks::{switcher_entries, SharedMarks};
 use crate::window::focus;
 
 const LLKHF_UP: u32 = 0x80;
@@ -132,12 +132,12 @@ fn set_switcher_active(active: bool) {
     SWITCHER_ACTIVE.store(active, Ordering::Relaxed);
 }
 
-pub fn install(marks: SharedMarks, config: Arc<Mutex<Config>>) {
+pub fn install(marks: SharedMarks, config: &Arc<Mutex<Config>>) {
     init_state(marks, config);
     install_hook();
 }
 
-pub fn init_state(marks: SharedMarks, config: Arc<Mutex<Config>>) {
+pub fn init_state(marks: SharedMarks, config: &Arc<Mutex<Config>>) {
     let config_guard = config.lock();
     let chord = parse_hold_chord(&config_guard.hotkeys.marks_switcher)
         .unwrap_or(HoldChord {
@@ -255,7 +255,8 @@ pub fn cancel_if_active() {
 }
 
 pub fn dispatch_key(vk: u32, key_up: bool) {
-    log::debug(format!("marks_switcher dispatch_key vk=0x{vk:X} key_up={key_up}"));
+    // Security: keystrokes at trace only — debug logs persist VK timing to disk.
+    log::trace(format!("marks_switcher dispatch_key vk=0x{vk:X} key_up={key_up}"));
     if key_up {
         let confirm = {
             let mut guard = HOOK_STATE.lock();
@@ -270,7 +271,7 @@ pub fn dispatch_key(vk: u32, key_up: bool) {
                 }
             }
             if should_confirm_release(state, &chord) {
-                log::debug(format!("marks_switcher confirm on key up vk=0x{vk:X}"));
+                log::trace(format!("marks_switcher confirm on key up vk=0x{vk:X}"));
                 let selected = state.selected;
                 let entries = state.entries.clone();
                 let marks = state.marks.clone();
@@ -328,12 +329,10 @@ pub fn poll_active() {
                     cycle(state, if backward { -1 } else { 1 });
                     state.last_trigger_down = true;
                 }
-            } else {
-                if state.last_trigger_down {
-                    log::debug("marks_switcher poll: trigger key released");
-                    state.last_trigger_down = false;
-                    state.trigger_released_since_activate = true;
-                }
+            } else if state.last_trigger_down {
+                log::debug("marks_switcher poll: trigger key released");
+                state.last_trigger_down = false;
+                state.trigger_released_since_activate = true;
             }
         }
         if should_confirm_release(state, &state.chord) {
@@ -644,11 +643,73 @@ fn post_jump(slot: u8) {
     unsafe {
         let _ = PostMessageW(
             Some(hwnd),
-            WM_JUMP_KEY,
+            crate::hotkeys::wm_jump_key(),
             WPARAM(slot as usize),
             LPARAM(0),
         );
     }
+}
+
+fn handle_switcher_manage_key(state: &mut HookState, vk: u32, key_up: bool) -> bool {
+    const VK_BACK: u32 = 0x08;
+    const VK_DELETE: u32 = 0x2E;
+
+    if !is_switcher_active() {
+        return false;
+    }
+    if key_up {
+        return false;
+    }
+
+    // 1. Handle deletion (Delete or Backspace)
+    if vk == VK_DELETE || vk == VK_BACK {
+        if let Some(entry) = state.entries.get(state.selected) {
+            let slot = entry.slot;
+            let new_entries = {
+                let mut marks_guard = state.marks.lock();
+                marks_guard.store.slots.remove(&slot.to_string());
+                let _ = marks_guard.store.save();
+                switcher_entries(&marks_guard.store)
+            };
+            if new_entries.is_empty() {
+                cancel_active(state);
+            } else {
+                state.entries = new_entries;
+                state.selected = state.selected.min(state.entries.len() - 1);
+                send_ui(SwitcherUiCommand::Show {
+                    entries: state.entries.clone(),
+                    selected: state.selected,
+                });
+            }
+        }
+        return true;
+    }
+
+    // 2. Handle move/swap (Shift + Nav Key)
+    sync_tracked_modifiers(&mut state.mods);
+    if state.mods.shift {
+        if let Some(binding) = state.switcher_nav_bindings.iter().find(|b| b.vk as u32 == vk) {
+            if let Some(entry) = state.entries.get(state.selected) {
+                let slot = entry.slot;
+                let earlier = binding.delta < 0;
+                let mut marks_guard = state.marks.lock();
+                if marks_guard.store.move_mark_slot(slot, earlier) {
+                    let new_entries = switcher_entries(&marks_guard.store);
+                    if let Some(new_pos) = new_entries.iter().position(|e| e.slot == slot) {
+                        state.selected = new_pos;
+                    }
+                    state.entries = new_entries;
+                    send_ui(SwitcherUiCommand::Show {
+                        entries: state.entries.clone(),
+                        selected: state.selected,
+                    });
+                }
+            }
+            return true;
+        }
+    }
+
+    false
 }
 
 fn handle_switcher_nav_key(state: &mut HookState, vk: u32, key_up: bool) {
@@ -681,7 +742,7 @@ fn handle_switcher_nav_key(state: &mut HookState, vk: u32, key_up: bool) {
     });
     if let Some(delta) = delta {
         state.switcher_nav_keys_down.insert(vk);
-        log::debug(format!(
+        log::trace(format!(
             "marks_switcher nav vk=0x{vk:X} delta={delta} mods={:?}",
             state.mods
         ));
@@ -716,7 +777,7 @@ fn handle_jump_key(state: &mut HookState, vk: u32, key_up: bool) -> Option<u8> {
     });
     if let Some(slot) = slot {
         state.jump_keys_down.insert(vk);
-        log::debug(format!(
+        log::trace(format!(
             "marks_switcher hook jump vk=0x{vk:X} slot={slot} mods={:?}",
             state.mods
         ));
@@ -741,7 +802,7 @@ fn handle_launcher_key(state: &mut HookState, vk: u32, key_up: bool) -> bool {
     if (tracked_mods_match(&state.mods, mods) && !tracked_extra_mods(&state.mods, mods))
         || (hold_mods_match_modifiers(mods) && !extra_mods_pressed_for(mods))
     {
-        log::debug(format!(
+        log::trace(format!(
             "marks_switcher hook launcher vk=0x{vk:X} mods={:?}",
             state.mods
         ));
@@ -758,7 +819,7 @@ fn post_launcher() {
     unsafe {
         let _ = PostMessageW(
             Some(hwnd),
-            crate::hotkeys::WM_LAUNCHER_KEY,
+            crate::hotkeys::wm_launcher_key(),
             WPARAM(0),
             LPARAM(0),
         );
@@ -816,6 +877,10 @@ fn should_swallow_key(state: &HookState, vk: u32, _key_up: bool) -> bool {
         if state.switcher_nav_bindings.iter().any(|b| b.vk as u32 == vk) {
             return true;
         }
+        // Swallow Delete (0x2E) and Backspace (0x08) keys
+        if vk == 0x2E || vk == 0x08 {
+            return true;
+        }
     }
     false
 }
@@ -840,7 +905,11 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
                 update_tracked_modifiers(&mut state.mods, vk, key_up);
                 jump_slot = handle_jump_key(state, vk, key_up);
                 trigger_launcher = handle_launcher_key(state, vk, key_up);
-                handle_switcher_nav_key(state, vk, key_up);
+                
+                let managed = handle_switcher_manage_key(state, vk, key_up);
+                if !managed {
+                    handle_switcher_nav_key(state, vk, key_up);
+                }
                 
                 if !injected {
                     crate::apps::hook::try_alt_double_tap(vk, key_up);
@@ -861,9 +930,9 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
             if let Some(hwnd) = hotkey_hwnd() {
                 let _ = PostMessageW(
                     Some(hwnd),
-                    WM_MARKS_KEY,
+                    crate::hotkeys::wm_marks_key(),
                     WPARAM(vk as usize),
-                    LPARAM(if key_up { 1 } else { 0 }),
+                    LPARAM(isize::from(key_up)),
                 );
             }
         }
