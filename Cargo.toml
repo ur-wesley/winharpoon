@@ -46,3 +46,34 @@ winres = "0.1"
 lto = true
 codegen-units = 1
 strip = true
+
+[lints.rust]
+# Win32 requires unsafe; keep explicit but not denied.
+missing_debug_implementations = "deny"
+missing_docs = "allow"
+unsafe_code = "allow"
+
+[lints.clippy]
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+complexity = { level = "deny", priority = -1 }
+perf = { level = "deny", priority = -1 }
+style = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+# Noise allowances: Win32 ABI + custom string logger.
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_sign_loss = "allow"
+cast_lossless = "allow"
+cast_precision_loss = "allow"
+borrow_as_ptr = "allow"
+ref_as_ptr = "allow"
+ptr_as_ptr = "allow"
+ptr_cast_constness = "allow"
+struct_excessive_bools = "allow"
+suboptimal_flops = "allow"
+significant_drop_tightening = "allow"
+missing_const_for_fn = "allow"
+too_many_lines = "allow"
+used_underscore_items = "allow"

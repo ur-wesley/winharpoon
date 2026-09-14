@@ -13,5 +13,21 @@ run = "cargo build --release"
 description = "Type-check without producing a binary"
 run = "cargo check"
 
+[tasks.clippy]
+description = "Strict Clippy (deny pedantic+nursery)"
+run = "cargo clippy --all-targets -- -D warnings"
+
+[tasks.test]
+description = "Run unit tests"
+run = "cargo test"
+
+[tasks.audit]
+description = "Supply-chain audit (cargo-audit, best-effort if installed)"
+run = "cargo audit || echo 'cargo-audit not installed (cargo install cargo-audit)'"
+
+[tasks.verify]
+description = "Full gate: check + clippy + tests"
+run = "cargo check && cargo clippy --all-targets -- -D warnings && cargo test"
+
 [tasks.dev]
 run = "cargo watch -x run"

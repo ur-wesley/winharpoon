@@ -1,3 +1,10 @@
+//! Build script: icon generation + Windows resources.
+//! Pedantic single-char math names are idiomatic here.
+#![allow(clippy::many_single_char_names)]
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::suboptimal_flops)]
+#![allow(clippy::missing_const_for_fn)]
+
 use image::{Rgba, RgbaImage};
 
 fn main() {
