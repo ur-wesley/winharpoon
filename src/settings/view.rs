@@ -73,12 +73,19 @@ pub fn render_settings(
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
-                    ui.label(
-                        egui::RichText::new("WinHarpoon")
-                            .size(24.0)
-                            .strong()
-                            .color(native_ui::ACCENT),
-                    );
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new("WinHarpoon")
+                                .size(24.0)
+                                .strong()
+                                .color(native_ui::ACCENT),
+                        );
+                        ui.label(
+                            egui::RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
+                                .size(13.5)
+                                .color(native_ui::TEXT_MUTED),
+                        );
+                    });
                     ui.label(
                         egui::RichText::new("Changes save and reload hotkeys automatically")
                             .size(13.5)
