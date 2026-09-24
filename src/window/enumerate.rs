@@ -79,17 +79,13 @@ unsafe fn window_info(hwnd: HWND) -> Option<WindowInfo> {
     }
 
     let len = GetWindowTextLengthW(hwnd);
-    if len == 0 {
-        return None;
-    }
-
-    let mut title_buf = vec![0u16; len as usize + 1];
-    GetWindowTextW(hwnd, &mut title_buf);
-    let title = util::from_wide(&title_buf);
-    if !is_reasonable_title(&title) {
-        log::trace(format!("skip hwnd={:?}: bad title len={}", hwnd.0, title.len()));
-        return None;
-    }
+    let raw_title = if len > 0 {
+        let mut title_buf = vec![0u16; len as usize + 1];
+        GetWindowTextW(hwnd, &mut title_buf);
+        util::from_wide(&title_buf)
+    } else {
+        String::new()
+    };
 
     let mut pid = 0u32;
     GetWindowThreadProcessId(hwnd, Some(&mut pid));
@@ -119,6 +115,11 @@ unsafe fn window_info(hwnd: HWND) -> Option<WindowInfo> {
     }
 
     let process_name = process_name::process_display_name(&exe_path);
+    let title = effective_title(&raw_title, &process_name);
+    if !is_reasonable_title(&title) {
+        log::trace(format!("skip hwnd={:?}: bad title len={}", hwnd.0, title.len()));
+        return None;
+    }
 
     Some(WindowInfo {
         hwnd: hwnd.0 as isize,
@@ -188,4 +189,30 @@ fn is_reasonable_title(title: &str) -> bool {
         return false;
     }
     true
+}
+
+pub fn effective_title(raw_title: &str, process_name: &str) -> String {
+    let trimmed = raw_title.trim();
+    if trimmed.is_empty() {
+        process_name.to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::effective_title;
+
+    #[test]
+    fn effective_title_empty_uses_process_name() {
+        assert_eq!(effective_title("", "Okena"), "Okena");
+        assert_eq!(effective_title("   ", "Okena"), "Okena");
+    }
+
+    #[test]
+    fn effective_title_nonempty_unchanged() {
+        assert_eq!(effective_title("My Doc", "Okena"), "My Doc");
+        assert_eq!(effective_title("  My Doc  ", "Okena"), "My Doc");
+    }
 }

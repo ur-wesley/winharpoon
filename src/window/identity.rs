@@ -64,6 +64,12 @@ pub fn resolve_identity<'a>(
     result
 }
 
+pub fn identities_match(stored: &WindowIdentity, live: &WindowIdentity) -> bool {
+    stored == live
+        || (paths_match(&stored.exe, &live.exe)
+            && title_score(&live.title, &stored.title) > 0)
+}
+
 fn paths_match(a: &Path, b: &Path) -> bool {
     a == b
         || a.file_name()
@@ -87,7 +93,7 @@ fn title_score(candidate: &str, target: &str) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_identity, title_score, WindowIdentity};
+    use super::{identities_match, resolve_identity, title_score, WindowIdentity};
     use crate::window::WindowInfo;
     use std::path::PathBuf;
 
@@ -127,5 +133,25 @@ mod tests {
         assert_eq!(title_score("abcdef", "abc"), 50);
         assert_eq!(title_score("XABCx", "abc"), 25);
         assert_eq!(title_score("xyz", "abc"), 0);
+    }
+
+    #[test]
+    fn identities_match_fuzzy_title_drift() {
+        let stored = id(
+            r"C:\Arbeit\project-vault\src-tauri\target\debug\project-vault.exe",
+            "Project Vault",
+        );
+        let live = id(
+            r"C:\Arbeit\project-vault\src-tauri\target\debug\project-vault.exe",
+            "project-vault - Project Vault",
+        );
+        assert!(identities_match(&stored, &live));
+    }
+
+    #[test]
+    fn identities_match_rejects_unrelated_title() {
+        let stored = id(r"D:\y\APP.exe", "Quarterly Report");
+        let live = id(r"D:\y\APP.exe", "Unrelated");
+        assert!(!identities_match(&stored, &live));
     }
 }

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::log;
 use crate::paths;
-use crate::window::identity::{resolve_identity, WindowIdentity};
+use crate::window::identity::{identities_match, resolve_identity, WindowIdentity};
 use crate::window::{enumerate_windows, focus, get_foreground_window, WindowInfo};
 
 #[derive(Debug, Clone)]
@@ -136,7 +136,7 @@ impl MarksStore {
         (1..=9).find(|slot| {
             self.slots
                 .get(&slot.to_string())
-                .is_some_and(|stored| stored == identity)
+                .is_some_and(|stored| identities_match(stored, identity))
         })
     }
 
@@ -373,5 +373,43 @@ mod tests {
     #[test]
     fn index_after_foreground_empty_is_zero() {
         assert_eq!(index_after_foreground(&[]), 0);
+    }
+
+    #[test]
+    fn find_slot_fuzzy_title_drift() {
+        let mut store = MarksStore::default();
+        store.slots.insert(
+            "1".into(),
+            WindowIdentity {
+                exe: PathBuf::from(
+                    r"C:\Arbeit\project-vault\src-tauri\target\debug\project-vault.exe",
+                ),
+                title: "Project Vault".into(),
+            },
+        );
+        let live = WindowIdentity {
+            exe: PathBuf::from(
+                r"C:\Arbeit\project-vault\src-tauri\target\debug\project-vault.exe",
+            ),
+            title: "project-vault - Project Vault".into(),
+        };
+        assert_eq!(store.find_slot(&live), Some(1));
+    }
+
+    #[test]
+    fn find_slot_rejects_unrelated_title() {
+        let mut store = MarksStore::default();
+        store.slots.insert(
+            "1".into(),
+            WindowIdentity {
+                exe: PathBuf::from(r"D:\y\APP.exe"),
+                title: "Quarterly Report".into(),
+            },
+        );
+        let live = WindowIdentity {
+            exe: PathBuf::from(r"D:\y\APP.exe"),
+            title: "Unrelated".into(),
+        };
+        assert_eq!(store.find_slot(&live), None);
     }
 }
