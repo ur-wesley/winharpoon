@@ -54,13 +54,29 @@ missing_docs = "allow"
 unsafe_code = "allow"
 
 [lints.clippy]
+# Very strict, per https://www.namtao.com/rust/#strict-lints and
+# https://www.namtao.com/rust-toolkit-2026/#clippy-config
 correctness = { level = "deny", priority = -1 }
 suspicious = { level = "deny", priority = -1 }
+style = { level = "deny", priority = -1 }
 complexity = { level = "deny", priority = -1 }
 perf = { level = "deny", priority = -1 }
-style = { level = "deny", priority = -1 }
 pedantic = { level = "deny", priority = -1 }
 nursery = { level = "deny", priority = -1 }
+# DENY PANICS / UNSAFE CONVERSIONS
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+arithmetic_side_effects = "deny"
+unreachable = "deny"
+unimplemented = "deny"
+unchecked_time_subtraction = "deny"
+todo = "deny"
+string_slice = "deny"
+panic_in_result_fn = "deny"
+panic = "deny"
+exit = "deny"
+as_conversions = "deny"
 # Noise allowances: Win32 ABI + custom string logger.
 cast_possible_truncation = "allow"
 cast_possible_wrap = "allow"

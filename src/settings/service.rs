@@ -58,10 +58,9 @@ mod tests {
         config.hotkeys.same_app_next = "Ctrl+Space".into();
         let errors = config.validate().unwrap_err();
         assert!(!errors.is_empty());
-        assert!(errors.iter().any(|e| matches!(
-            e,
-            ConfigValidationError::DuplicateBinding { .. }
-        )));
+        assert!(errors
+            .iter()
+            .any(|e| matches!(e, ConfigValidationError::DuplicateBinding { .. })));
     }
 
     #[test]

@@ -5,8 +5,8 @@ use windows::Win32::Storage::FileSystem::{
     GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
 };
 use windows::Win32::System::Registry::{
-    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, RegCloseKey, RegEnumKeyExW,
-    RegGetValueW, RegOpenKeyExW, RRF_RT_REG_SZ,
+    RegCloseKey, RegEnumKeyExW, RegGetValueW, RegOpenKeyExW, HKEY, HKEY_CURRENT_USER,
+    HKEY_LOCAL_MACHINE, KEY_READ, RRF_RT_REG_SZ,
 };
 
 use crate::log;
@@ -45,7 +45,7 @@ fn walk_hive(hive: HKEY, out: &mut Vec<AppEntry>) {
     let mut index = 0u32;
     loop {
         let mut name_buf = [0u16; 256];
-        let mut name_len: u32 = name_buf.len() as u32;
+        let mut name_len: u32 = u32::try_from(name_buf.len()).unwrap_or(u32::MAX);
         let written = unsafe {
             RegEnumKeyExW(
                 key,
@@ -61,19 +61,21 @@ fn walk_hive(hive: HKEY, out: &mut Vec<AppEntry>) {
         if written.is_err() {
             break;
         }
-        if name_len == 0 || name_len > name_buf.len() as u32 {
-            index += 1;
+        let name_cap = u32::try_from(name_buf.len()).unwrap_or(0);
+        if name_len == 0 || name_len > name_cap {
+            index = index.saturating_add(1);
             continue;
         }
 
-        let name = util::from_wide(&name_buf[..name_len as usize]);
+        let end = usize::try_from(name_len).unwrap_or(0).min(name_buf.len());
+        let name = util::from_wide(name_buf.get(..end).unwrap_or_default());
         if !name.is_empty() {
             if let Some(entry) = read_entry(key, &name) {
                 out.push(entry);
             }
         }
 
-        index += 1;
+        index = index.saturating_add(1);
     }
 
     let _ = unsafe { RegCloseKey(key) };
@@ -146,7 +148,7 @@ fn read_entry(parent: HKEY, name: &str) -> Option<AppEntry> {
 
 fn read_default_string(key: HKEY) -> Option<String> {
     let mut buf = vec![0u16; 2048];
-    let mut size: u32 = (buf.len() * 2) as u32;
+    let mut size: u32 = u32::try_from(buf.len().saturating_mul(2)).unwrap_or(u32::MAX);
     let status = unsafe {
         RegGetValueW(
             key,
@@ -154,15 +156,20 @@ fn read_default_string(key: HKEY) -> Option<String> {
             PCWSTR::null(),
             RRF_RT_REG_SZ,
             None,
-            Some(buf.as_mut_ptr() as *mut _),
+            Some(buf.as_mut_ptr().cast::<core::ffi::c_void>()),
             Some(&mut size),
         )
     };
     if status.is_err() || size < 2 {
         return None;
     }
-    let char_count = (size as usize / 2).saturating_sub(1);
-    Some(util::from_wide(&buf[..char_count]))
+    let char_count = usize::try_from(size)
+        .unwrap_or(0)
+        .saturating_div(2)
+        .saturating_sub(1);
+    Some(util::from_wide(
+        buf.get(..char_count.min(buf.len())).unwrap_or_default(),
+    ))
 }
 
 fn file_description(exe: &std::path::Path) -> String {
@@ -179,13 +186,13 @@ fn read_version_info_string(exe: &std::path::Path, field: &str) -> Option<String
     if size == 0 {
         return None;
     }
-    let mut data = vec![0u8; size as usize];
+    let mut data = vec![0u8; usize::try_from(size).unwrap_or(0)];
     let ok = unsafe {
         GetFileVersionInfoW(
             PCWSTR(path_wide.as_ptr()),
             Some(handle),
             size,
-            data.as_mut_ptr() as *mut _,
+            data.as_mut_ptr().cast::<core::ffi::c_void>(),
         )
     };
     if ok.is_err() {
@@ -196,7 +203,7 @@ fn read_version_info_string(exe: &std::path::Path, field: &str) -> Option<String
     let query = util::wide("\\VarFileInfo\\Translation");
     let ok = unsafe {
         VerQueryValueW(
-            data.as_ptr() as *const _,
+            data.as_ptr().cast::<core::ffi::c_void>(),
             PCWSTR(query.as_ptr()),
             &mut lang_info_ptr,
             &mut lang_info_len,
@@ -205,21 +212,21 @@ fn read_version_info_string(exe: &std::path::Path, field: &str) -> Option<String
     if !ok.as_bool() || lang_info_ptr.is_null() || lang_info_len < 4 {
         return None;
     }
-    let translations = unsafe {
-        std::slice::from_raw_parts(lang_info_ptr as *const u16, (lang_info_len as usize) * 2)
-    };
-    if translations.len() < 2 {
-        return None;
-    }
-    let lang = u16::from_le(translations[0]);
-    let code_page = u16::from_le(translations[1]);
+    // `VerQueryValueW` reports the translation block size in bytes; one
+    // entry is two `u16` (language + code page).
+    let entry_len = usize::try_from(lang_info_len.saturating_div(2)).unwrap_or(0);
+    let translations =
+        unsafe { std::slice::from_raw_parts(lang_info_ptr.cast::<u16>(), entry_len) };
+    let [lang_raw, code_raw] = *translations.first_chunk::<2>()?;
+    let lang = u16::from_le(lang_raw);
+    let code_page = u16::from_le(code_raw);
     let sub_block = format!("StringFileInfo\\{lang:04x}{code_page:04x}\\{field}");
     let sub_wide = util::wide(&sub_block);
     let mut value_ptr = std::ptr::null_mut();
     let mut value_len = 0u32;
     let ok = unsafe {
         VerQueryValueW(
-            data.as_ptr() as *const _,
+            data.as_ptr().cast::<core::ffi::c_void>(),
             PCWSTR(sub_wide.as_ptr()),
             &mut value_ptr,
             &mut value_len,
@@ -228,20 +235,28 @@ fn read_version_info_string(exe: &std::path::Path, field: &str) -> Option<String
     if !ok.as_bool() || value_ptr.is_null() {
         return None;
     }
-    let chars =
-        unsafe { std::slice::from_raw_parts(value_ptr as *const u16, value_len as usize) };
+    let chars = unsafe {
+        std::slice::from_raw_parts(
+            value_ptr.cast::<u16>(),
+            usize::try_from(value_len).unwrap_or(0),
+        )
+    };
     let end = chars.iter().position(|&c| c == 0).unwrap_or(chars.len());
-    Some(String::from_utf16_lossy(&chars[..end]))
+    Some(String::from_utf16_lossy(
+        chars.get(..end).unwrap_or_default(),
+    ))
 }
 
 fn strip_quotes(s: &str) -> String {
     let trimmed = s.trim();
-    if trimmed.len() >= 2
-        && ((trimmed.starts_with('"') && trimmed.ends_with('"'))
-            || (trimmed.starts_with('\'') && trimmed.ends_with('\'')))
-    {
-        trimmed[1..trimmed.len() - 1].to_string()
-    } else {
-        trimmed.to_string()
+    if let Some(inner) = trimmed.strip_prefix('"').and_then(|t| t.strip_suffix('"')) {
+        return inner.to_string();
     }
+    if let Some(inner) = trimmed
+        .strip_prefix('\'')
+        .and_then(|t| t.strip_suffix('\''))
+    {
+        return inner.to_string();
+    }
+    trimmed.to_string()
 }

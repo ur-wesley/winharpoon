@@ -55,10 +55,12 @@ impl FavoritesStore {
         #[cfg(not(test))]
         {
             paths::ensure_app_data();
-            let _ = paths::atomic_write(
-                &paths::favorites_path(),
-                &toml::to_string_pretty(self).expect("serialize"),
-            );
+            match toml::to_string_pretty(self) {
+                Ok(text) => {
+                    let _ = paths::atomic_write(&paths::favorites_path(), &text);
+                }
+                Err(err) => crate::log::warn(format!("favorites save: serialize failed: {err}")),
+            }
         }
     }
 
@@ -91,7 +93,8 @@ impl FavoritesStore {
         if self.favorites.is_empty() {
             return;
         }
-        let known_ids: std::collections::HashSet<&str> = entries.iter().map(|e| e.id.as_str()).collect();
+        let known_ids: std::collections::HashSet<&str> =
+            entries.iter().map(|e| e.id.as_str()).collect();
         let mut changed = false;
         for fav in &mut self.favorites {
             if known_ids.contains(fav.id.as_str()) {

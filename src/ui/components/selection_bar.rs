@@ -2,7 +2,6 @@ use eframe::egui;
 
 use crate::native_ui;
 
-
 pub fn primary_list_text_color(keyboard_highlight: bool) -> egui::Color32 {
     if keyboard_highlight {
         egui::Color32::WHITE

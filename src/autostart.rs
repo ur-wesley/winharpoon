@@ -73,7 +73,7 @@ fn read_run_value() -> Option<String> {
             key,
             PCWSTR(name.as_ptr()),
             None,
-            Some(&mut kind as *mut _),
+            Some(std::ptr::addr_of_mut!(kind)),
             None,
             Some(&mut size),
         );
@@ -82,14 +82,14 @@ fn read_run_value() -> Option<String> {
             return None;
         }
 
-        let wchar_count = (size as usize / 2).max(1);
+        let wchar_count = usize::try_from(size).unwrap_or(0).saturating_div(2).max(1);
         let mut buffer = vec![0u16; wchar_count];
         let status = RegQueryValueExW(
             key,
             PCWSTR(name.as_ptr()),
             None,
-            Some(&mut kind as *mut _),
-            Some(buffer.as_mut_ptr() as *mut u8),
+            Some(std::ptr::addr_of_mut!(kind)),
+            Some(buffer.as_mut_ptr().cast::<u8>()),
             Some(&mut size),
         );
         let _ = RegCloseKey(key);
@@ -112,15 +112,15 @@ fn write_run_value(path: &str) -> Result<(), String> {
         let key = open_run_key(KEY_SET_VALUE)?;
         let name = util::wide(VALUE_NAME);
         let data = util::wide(&quoted);
-        let byte_len = (data.len() * 2) as u32;
+        let byte_len = u32::try_from(data.len().saturating_mul(2)).unwrap_or(u32::MAX);
         let status = RegSetValueExW(
             key,
             PCWSTR(name.as_ptr()),
             Some(0),
             REG_SZ,
             Some(std::slice::from_raw_parts(
-                data.as_ptr() as *const u8,
-                byte_len as usize,
+                data.as_ptr().cast::<u8>(),
+                usize::try_from(byte_len).unwrap_or(0),
             )),
         );
         let _ = RegCloseKey(key);
@@ -179,7 +179,10 @@ fn current_quoted_exe() -> Result<String, String> {
 }
 
 fn normalize(s: &str) -> String {
-    s.trim().trim_matches('"').replace('/', "\\").to_ascii_lowercase()
+    s.trim()
+        .trim_matches('"')
+        .replace('/', "\\")
+        .to_ascii_lowercase()
 }
 
 #[cfg(test)]
@@ -189,7 +192,10 @@ mod tests {
     #[test]
     fn quote_adds_quotes_only_with_spaces() {
         assert_eq!(quote_exe_path(r"C:\app\win.exe"), r"C:\app\win.exe");
-        assert_eq!(quote_exe_path(r"C:\my app\win.exe"), r#""C:\my app\win.exe""#);
+        assert_eq!(
+            quote_exe_path(r"C:\my app\win.exe"),
+            r#""C:\my app\win.exe""#
+        );
     }
 
     #[test]

@@ -12,17 +12,12 @@ const MAX_LOG_ENTRIES: usize = 5000;
 
 static TOAST_APP_ID: OnceLock<String> = OnceLock::new();
 
-
 pub fn init_toast() {
     let icon = std::env::current_exe()
         .ok()
         .filter(|path| path.is_absolute());
 
-    match register(
-        APP_ID,
-        "WinHarpoon",
-        icon.as_deref(),
-    ) {
+    match register(APP_ID, "WinHarpoon", icon.as_deref()) {
         Ok(()) => debug(format!("toast AUMID registered: {APP_ID}")),
         Err(error) => warn(format!("toast AUMID registration failed: {error}")),
     }
@@ -59,11 +54,7 @@ pub fn error(message: impl AsRef<str>) {
 }
 
 fn log_line(level: &str, message: impl AsRef<str>) {
-    let line = format!(
-        "[{}] [{level}] {}",
-        timestamp(),
-        message.as_ref()
-    );
+    let line = format!("[{}] [{level}] {}", timestamp(), message.as_ref());
     let _ = io::stderr().write_all(line.as_bytes());
     let _ = io::stderr().write_all(b"\n");
 
@@ -88,8 +79,8 @@ fn prune_log_file(path: &std::path::Path) -> io::Result<()> {
     let content = std::fs::read_to_string(path)?;
     let lines: Vec<&str> = content.lines().collect();
     if lines.len() > MAX_LOG_ENTRIES {
-        let start = lines.len() - MAX_LOG_ENTRIES;
-        let pruned_content = lines[start..].join("\n") + "\n";
+        let start = lines.len().saturating_sub(MAX_LOG_ENTRIES);
+        let pruned_content = lines.get(start..).unwrap_or_default().join("\n") + "\n";
         crate::paths::atomic_write(path, &pruned_content)?;
     }
     Ok(())
@@ -146,7 +137,7 @@ mod tests {
         let temp_dir = std::env::temp_dir();
         let test_path = temp_dir.join("test_winharpoon_prune.log");
         println!("test_path: {test_path:?}");
-        
+
         // Write 6000 lines
         let mut content = String::new();
         for i in 0..6000 {
@@ -180,4 +171,3 @@ mod tests {
         assert_eq!(truncate_notify_body("short"), "short");
     }
 }
-

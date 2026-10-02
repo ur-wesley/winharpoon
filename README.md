@@ -21,6 +21,14 @@ cargo build --release
 .\target\release\winharpoon.exe
 ```
 
+## Development
+
+```powershell
+mise install        # toolchain + lefthook
+mise run setup      # install git hooks (fmt + clippy on every commit)
+mise run verify     # full gate: check + clippy + tests
+```
+
 ## Install
 
 Build the Windows installer (requires [Inno Setup 6](https://jrsoftware.org/isinfo.php)):

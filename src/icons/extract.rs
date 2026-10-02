@@ -23,7 +23,7 @@ pub fn extract_file_icon(path: &Path, size: u32) -> Option<ColorImage> {
             PCWSTR(wide.as_ptr()),
             FILE_FLAGS_AND_ATTRIBUTES::default(),
             Some(&mut shfi),
-            std::mem::size_of::<SHFILEINFOW>() as u32,
+            crate::win_cast::size_of_u32::<SHFILEINFOW>(),
             SHGFI_ICON | SHGFI_LARGEICON,
         );
         if shfi.hIcon.0.is_null() {
@@ -36,7 +36,7 @@ pub fn extract_file_icon(path: &Path, size: u32) -> Option<ColorImage> {
 }
 
 unsafe fn icon_to_color_image(icon: HICON, size: u32) -> Option<ColorImage> {
-    let dim = size as i32;
+    let dim = i32::try_from(size).unwrap_or(0);
     let screen = GetDC(None);
     if screen.0.is_null() {
         return None;
@@ -60,9 +60,9 @@ unsafe fn icon_to_color_image(icon: HICON, size: u32) -> Option<ColorImage> {
 
     let mut bmi = BITMAPINFO {
         bmiHeader: BITMAPINFOHEADER {
-            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biSize: crate::win_cast::size_of_u32::<BITMAPINFOHEADER>(),
             biWidth: dim,
-            biHeight: -dim,
+            biHeight: dim.saturating_neg(),
             biPlanes: 1,
             biBitCount: 32,
             biCompression: BI_RGB.0,
@@ -71,13 +71,14 @@ unsafe fn icon_to_color_image(icon: HICON, size: u32) -> Option<ColorImage> {
         ..Default::default()
     };
 
-    let mut pixels = vec![0u8; (dim * dim * 4) as usize];
+    let pixel_count = usize::try_from(dim.saturating_mul(dim).saturating_mul(4)).unwrap_or(0);
+    let mut pixels = vec![0u8; pixel_count];
     let _ = GetDIBits(
         mem_dc,
         bitmap,
         0,
         size,
-        Some(pixels.as_mut_ptr() as *mut _),
+        Some(pixels.as_mut_ptr().cast::<core::ffi::c_void>()),
         &mut bmi,
         DIB_RGB_COLORS,
     );
@@ -88,15 +89,18 @@ unsafe fn icon_to_color_image(icon: HICON, size: u32) -> Option<ColorImage> {
     let _ = ReleaseDC(None, screen);
 
     for chunk in pixels.chunks_exact_mut(4) {
-        chunk.swap(0, 2);
-        let alpha = chunk[3];
-        if alpha == 0 && chunk[0] | chunk[1] | chunk[2] != 0 {
-            chunk[3] = 255;
+        let Some([b, g, r, a]) = chunk.first_chunk_mut::<4>() else {
+            continue;
+        };
+        std::mem::swap(b, r);
+        if *a == 0 && *b | *g | *r != 0 {
+            *a = 255;
         }
     }
 
+    let dim_usize = usize::try_from(size).unwrap_or(0);
     Some(ColorImage::from_rgba_unmultiplied(
-        [size as usize, size as usize],
+        [dim_usize, dim_usize],
         &pixels,
     ))
 }

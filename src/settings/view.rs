@@ -9,9 +9,7 @@ use crate::config::{Config, ConfigValidationError};
 use crate::hotkeys::HotkeyRegistrationResult;
 use crate::native_ui;
 use crate::paths;
-use crate::settings::controller::{
-    binding_display_name, SettingsAction, SettingsController,
-};
+use crate::settings::controller::{binding_display_name, SettingsAction, SettingsController};
 use crate::ui::components::chord_button::{chord_binding_button, ChordButtonProps};
 
 pub struct SettingsViewOutput {
@@ -184,10 +182,7 @@ fn render_general_row(
                     .size(13.5)
                     .strong(),
             );
-            native_ui::muted_label(
-                ui,
-                "Launch WinHarpoon automatically when you sign in",
-            );
+            native_ui::muted_label(ui, "Launch WinHarpoon automatically when you sign in");
         });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.checkbox(&mut autostart, "Enabled").changed() {
@@ -204,7 +199,11 @@ fn render_general_row(
     }
 }
 
-fn render_apps_row(ui: &mut egui::Ui, controller: &SettingsController, actions: &mut Vec<SettingsAction>) {
+fn render_apps_row(
+    ui: &mut egui::Ui,
+    controller: &SettingsController,
+    actions: &mut Vec<SettingsAction>,
+) {
     let modifier = controller.draft.apps.double_tap_key.as_str();
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
@@ -253,7 +252,10 @@ fn render_apps_row(ui: &mut egui::Ui, controller: &SettingsController, actions: 
         egui::ComboBox::from_id_salt("apps_scope")
             .selected_text(scope_label)
             .show_ui(ui, |ui| {
-                for (value, label) in [("anywhere", "Anywhere"), ("not_fullscreen", "Not when fullscreen")] {
+                for (value, label) in [
+                    ("anywhere", "Anywhere"),
+                    ("not_fullscreen", "Not when fullscreen"),
+                ] {
                     if ui
                         .selectable_value(&mut scope, value.to_string(), label)
                         .clicked()

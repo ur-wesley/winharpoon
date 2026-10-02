@@ -17,18 +17,19 @@ mod settings;
 mod tray;
 mod ui;
 mod util;
+mod win_cast;
 mod window;
 
 use std::sync::Arc;
 
-use parking_lot::Mutex;
-use windows::Win32::Foundation::CloseHandle;
-use windows::Win32::System::Threading::CreateMutexW;
 use crate::app::{dispatch_action, reload_hotkeys, AppState};
 use crate::config::Config;
 use crate::hotkeys::{report_config_errors, HotkeyManager};
 use crate::modes::marks::shared_marks;
 use crate::tray::init_tray;
+use parking_lot::Mutex;
+use windows::Win32::Foundation::CloseHandle;
+use windows::Win32::System::Threading::CreateMutexW;
 
 const SINGLE_INSTANCE_MUTEX: &str = "WinHarpoon_SingleInstance";
 
@@ -61,7 +62,11 @@ fn main() {
     autostart::sync_from_config(config.lock().general.autostart);
     let marks = shared_marks();
     let favorites = apps::shared_favorites();
-    let state = Arc::new(Mutex::new(AppState::new(config.clone(), marks.clone(), favorites)));
+    let state = Arc::new(Mutex::new(AppState::new(
+        config.clone(),
+        marks.clone(),
+        favorites,
+    )));
     marks_switcher::init(marks.clone(), &config);
     launcher::init(config.clone(), state.clone(), marks);
     apps::init();

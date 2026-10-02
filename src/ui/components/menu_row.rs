@@ -19,7 +19,9 @@ pub struct MenuRowProps<'a> {
 }
 
 pub fn menu_row(ui: &mut egui::Ui, props: &MenuRowProps<'_>) -> egui::Response {
-    let text_color = props.accent.unwrap_or(egui::Color32::from_rgb(220, 224, 234));
+    let text_color = props
+        .accent
+        .unwrap_or(egui::Color32::from_rgb(220, 224, 234));
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), props.height),
         egui::Sense::click(),
@@ -73,7 +75,10 @@ pub fn slot_row(ui: &mut egui::Ui, props: &SlotRowProps<'_>) -> egui::Response {
             );
         }
         let badge_rect = egui::Rect::from_center_size(
-            rect.left_center() + egui::vec2(ROW_LEFT_PADDING + SLOT_BADGE_WIDTH * 0.5, 0.0),
+            egui::pos2(
+                rect.left_center().x + ROW_LEFT_PADDING + SLOT_BADGE_WIDTH * 0.5,
+                rect.left_center().y,
+            ),
             egui::vec2(SLOT_BADGE_WIDTH, SLOT_BADGE_WIDTH),
         );
         let badge_fill = if props.filled {

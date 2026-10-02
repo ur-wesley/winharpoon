@@ -2,13 +2,14 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs;
 
 use serde::{Deserialize, Serialize};
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN, VIRTUAL_KEY,
-};
 
 use crate::hotkeys::HotkeyAction;
 use crate::log;
 use crate::paths;
+
+mod chords;
+
+pub use chords::{chord_from_vk_mods, parse_chord, parse_hold_chord, HoldChord, ParsedHotkey};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -20,13 +21,11 @@ pub struct Config {
     pub apps: AppsConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GeneralConfig {
     #[serde(default)]
     pub autostart: bool,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HotkeysConfig {
@@ -162,12 +161,6 @@ impl Default for AppsConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ParsedHotkey {
-    pub modifiers: u32,
-    pub vk: u16,
-}
-
 #[derive(Debug, Clone)]
 pub struct HotkeyBinding {
     pub action: HotkeyAction,
@@ -178,8 +171,16 @@ pub struct HotkeyBinding {
 
 #[derive(Debug, Clone)]
 pub enum ConfigValidationError {
-    DuplicateBinding { chord: String, first: String, second: String },
-    InvalidChord { label: String, chord: String, reason: String },
+    DuplicateBinding {
+        chord: String,
+        first: String,
+        second: String,
+    },
+    InvalidChord {
+        label: String,
+        chord: String,
+        reason: String,
+    },
 }
 
 fn default_marks_switcher() -> String {
@@ -196,12 +197,6 @@ fn default_marks_switcher_prev() -> String {
 
 fn default_mark_toggle() -> String {
     "Win+Alt+Shift+M".into()
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HoldChord {
-    pub hold_modifiers: u32,
-    pub trigger_vk: u16,
 }
 
 impl Default for Config {
@@ -286,7 +281,7 @@ impl Config {
             paths::ensure_app_data();
             let path = paths::config_path();
             log::debug(format!("Config::save to {}", path.display()));
-            let text = toml::to_string_pretty(self).expect("serialize config");
+            let text = toml::to_string_pretty(self).map_err(std::io::Error::other)?;
             paths::atomic_write(&path, &text)
         }
     }
@@ -341,7 +336,11 @@ impl Config {
             ),
             binding("mark_next", &self.hotkeys.mark_next, HotkeyAction::MarkNext),
             binding("mark_prev", &self.hotkeys.mark_prev, HotkeyAction::MarkPrev),
-            binding("mark_toggle", &self.hotkeys.mark_toggle, HotkeyAction::ToggleMark),
+            binding(
+                "mark_toggle",
+                &self.hotkeys.mark_toggle,
+                HotkeyAction::ToggleMark,
+            ),
             binding(
                 "marks_switcher_next",
                 &self.hotkeys.marks_switcher_next,
@@ -450,7 +449,7 @@ fn validate_bindings(
         } else {
             seen.insert(parsed.clone(), b.label.clone());
         }
-        if is_windows_reserved(&b.chord) {
+        if chords::is_windows_reserved(&b.chord) {
             errors.push(ConfigValidationError::InvalidChord {
                 label: b.label.clone(),
                 chord: b.chord.clone(),
@@ -489,164 +488,9 @@ fn binding(label: &str, chord: &str, action: HotkeyAction) -> HotkeyBinding {
     }
 }
 
-pub fn parse_chord(input: &str) -> Result<ParsedHotkey, String> {
-    log::trace(format!("parse_chord: {input}"));
-    let mut modifiers = MOD_NOREPEAT;
-    let mut vk: Option<u16> = None;
-
-    for part in input.split('+').map(str::trim).filter(|p| !p.is_empty()) {
-        let upper = part.to_ascii_uppercase();
-        match upper.as_str() {
-            "WIN" | "SUPER" | "META" => modifiers |= MOD_WIN,
-            "ALT" => modifiers |= MOD_ALT,
-            "CTRL" | "CONTROL" => modifiers |= MOD_CONTROL,
-            "SHIFT" => modifiers |= MOD_SHIFT,
-            _ => {
-                if vk.is_some() {
-                    return Err(format!("multiple keys in chord: {input}"));
-                }
-                vk = Some(parse_vk(part)?);
-            }
-        }
-    }
-
-    let vk = vk.ok_or_else(|| format!("missing key in chord: {input}"))?;
-    let parsed = ParsedHotkey {
-        modifiers: modifiers.0,
-        vk,
-    };
-    log::trace(format!(
-        "parse_chord ok: {input} -> mods=0x{:X} vk=0x{:X}",
-        parsed.modifiers, parsed.vk
-    ));
-    Ok(parsed)
-}
-
-pub fn parse_hold_chord(input: &str) -> Result<HoldChord, String> {
-    let parsed = parse_chord(input)?;
-    let hold_modifiers = parsed.modifiers & !MOD_NOREPEAT.0;
-    Ok(HoldChord {
-        hold_modifiers,
-        trigger_vk: parsed.vk,
-    })
-}
-
-fn parse_vk(part: &str) -> Result<u16, String> {
-    let upper = part.to_ascii_uppercase();
-    if upper.len() == 1 {
-        let c = upper.chars().next().unwrap();
-        if c.is_ascii_alphanumeric() {
-            return Ok(c as u16);
-        }
-    }
-    if upper.len() == 2 && upper.chars().all(|c| c.is_ascii_digit()) {
-        let n: u8 = upper.parse().map_err(|_| format!("bad digit key: {part}"))?;
-        if (1..=9).contains(&n) {
-            return Ok(0x30 + n as u16);
-        }
-    }
-    if upper.len() == 2 && upper.starts_with('F') {
-        let n: u8 = upper[1..]
-            .parse()
-            .map_err(|_| format!("bad function key: {part}"))?;
-        if (1..=24).contains(&n) {
-            return Ok(0x70 + (n as u16 - 1));
-        }
-    }
-
-    let mapped = match upper.as_str() {
-        "GRAVE" | "`" | "OEM_3" => 0xC0,
-        "MINUS" | "DASH" | "-" => 0xBD,
-        "EQUAL" | "=" => 0xBB,
-        "LBRACKET" | "BRACKETLEFT" | "[" => 0xDB,
-        "RBRACKET" | "BRACKETRIGHT" | "]" => 0xDD,
-        "BACKSLASH" | "\\" => 0xDC,
-        "SEMICOLON" | ";" => 0xBA,
-        "QUOTE" | "'" => 0xDE,
-        "COMMA" | "," => 0xBC,
-        "PERIOD" | "." => 0xBE,
-        "SLASH" | "/" => 0xBF,
-        "SPACE" => 0x20,
-        "TAB" => 0x09,
-        "ESCAPE" | "ESC" => 0x1B,
-        "BACK" | "BACKSPACE" => 0x08,
-        "RETURN" | "ENTER" => 0x0D,
-        "INSERT" => 0x2D,
-        "DELETE" => 0x2E,
-        "HOME" => 0x24,
-        "END" => 0x23,
-        "PAGEUP" => 0x21,
-        "PAGEDOWN" => 0x22,
-        "LEFT" => 0x25,
-        "UP" => 0x26,
-        "RIGHT" => 0x27,
-        "DOWN" => 0x28,
-        _ => return Err(format!("unknown key: {part}")),
-    };
-    Ok(mapped)
-}
-
-pub fn format_vk(vk: u16) -> String {
-    if (0x30..=0x39).contains(&vk) {
-        return ((vk as u8) as char).to_string();
-    }
-    if (0x41..=0x5A).contains(&vk) {
-        return ((vk as u8) as char).to_string();
-    }
-    if (0x70..=0x87).contains(&vk) {
-        return format!("F{}", vk - 0x70 + 1);
-    }
-    match vk {
-        0xC0 => "Grave".into(),
-        0xBD => "Minus".into(),
-        0xBB => "Equal".into(),
-        0xDB => "BracketLeft".into(),
-        0xDD => "BracketRight".into(),
-        0x20 => "Space".into(),
-        0x09 => "Tab".into(),
-        0x1B => "Esc".into(),
-        _ => format!("VK_{vk:04X}"),
-    }
-}
-
-pub fn format_modifiers(mods: u32) -> String {
-    let mods = HOT_KEY_MODIFIERS(mods);
-    let mut parts = Vec::new();
-    if (mods & MOD_WIN).0 != 0 {
-        parts.push("Win");
-    }
-    if (mods & MOD_CONTROL).0 != 0 {
-        parts.push("Ctrl");
-    }
-    if (mods & MOD_ALT).0 != 0 {
-        parts.push("Alt");
-    }
-    if (mods & MOD_SHIFT).0 != 0 {
-        parts.push("Shift");
-    }
-    parts.join("+")
-}
-
-fn is_windows_reserved(chord: &str) -> bool {
-    matches!(
-        chord.to_ascii_uppercase().as_str(),
-        "WIN+L" | "WIN+D" | "WIN+E" | "WIN+R" | "WIN+I" | "WIN+X" | "CTRL+ALT+DEL"
-    )
-}
-
-pub fn chord_from_vk_mods(vk: VIRTUAL_KEY, mods: u32) -> String {
-    let key = format_vk(vk.0);
-    let prefix = format_modifiers(mods);
-    if prefix.is_empty() {
-        key
-    } else {
-        format!("{prefix}+{key}")
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{parse_chord, AppsConfig, Config, DoubleTapModifier};
+    use super::{AppsConfig, Config, DoubleTapModifier};
 
     #[test]
     fn default_bindings_are_unique_and_parseable() {
@@ -682,21 +526,6 @@ mod tests {
         };
         apps.normalize();
         assert_eq!(apps.double_tap_key, "Alt");
-    }
-
-    #[test]
-    fn parse_chord_rejects_multiple_keys() {
-        assert!(parse_chord("Ctrl+A+B").is_err());
-    }
-
-    #[test]
-    fn parse_chord_rejects_missing_key() {
-        assert!(parse_chord("Win+Alt").is_err());
-    }
-
-    #[test]
-    fn parse_chord_rejects_unknown_key() {
-        assert!(parse_chord("Win+Frobnicate").is_err());
     }
 
     #[test]

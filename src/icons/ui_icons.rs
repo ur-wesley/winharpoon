@@ -33,7 +33,13 @@ fn tray_material_icon(kind: TrayIconKind) -> egui_material_icons::MaterialIcon {
     }
 }
 
-pub fn paint_tray_icon(painter: &Painter, rect: Rect, kind: TrayIconKind, size: f32, color: Color32) {
+pub fn paint_tray_icon(
+    painter: &Painter,
+    rect: Rect,
+    kind: TrayIconKind,
+    size: f32,
+    color: Color32,
+) {
     let icon = tray_material_icon(kind);
     painter.text(
         rect.center(),
@@ -43,5 +49,3 @@ pub fn paint_tray_icon(painter: &Painter, rect: Rect, kind: TrayIconKind, size: 
         color,
     );
 }
-
-

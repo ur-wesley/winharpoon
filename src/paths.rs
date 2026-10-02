@@ -61,7 +61,9 @@ pub fn open_config_folder() {
     let path = app_data_dir();
     log::debug(format!("open_config_folder: {}", path.display()));
     // Absolute path avoids PATH hijack (explorer.exe spoof).
-    let explorer = std::env::var("SystemRoot")
-        .map_or_else(|_| r"C:\Windows\explorer.exe".into(), |r| format!("{r}\\explorer.exe"));
+    let explorer = std::env::var("SystemRoot").map_or_else(
+        |_| r"C:\Windows\explorer.exe".into(),
+        |r| format!("{r}\\explorer.exe"),
+    );
     let _ = std::process::Command::new(explorer).arg(path).spawn();
 }

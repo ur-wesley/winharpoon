@@ -20,7 +20,6 @@ pub struct LauncherPanel {
     lifecycle: OverlayLifecycle,
 }
 
-
 impl LauncherPanel {
     pub fn visible(&self) -> bool {
         self.controller.visible

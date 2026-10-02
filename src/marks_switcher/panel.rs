@@ -44,15 +44,18 @@ impl MarksSwitcherController {
     }
 }
 
-fn capped_content_size(ctx: &egui::Context, measured: egui::Vec2, entry_count: usize) -> egui::Vec2 {
+fn capped_content_size(
+    ctx: &egui::Context,
+    measured: egui::Vec2,
+    entry_count: usize,
+) -> egui::Vec2 {
     let content = if measured == egui::Vec2::ZERO {
         native_ui::marks_switcher_content_size(entry_count)
     } else {
         measured
     };
-    let max_width = ctx
-        .input(|i| i.viewport().monitor_size.map(|s| s.x * 0.9))
-        .unwrap_or(1200.0);
+    let max_width = crate::platform::active_monitor_work_area(ctx).width() * 0.9;
+    let max_width = if max_width > 1.0 { max_width } else { 1200.0 };
     if content.x > max_width {
         egui::vec2(max_width, content.y)
     } else {
@@ -131,11 +134,8 @@ impl MarksSwitcherPanel {
 
         self.lifecycle.tick();
         if self.lifecycle.open_frames <= 3 {
-            let content = capped_content_size(
-                &ctx,
-                self.measured_size,
-                self.controller.entries.len(),
-            );
+            let content =
+                capped_content_size(&ctx, self.measured_size, self.controller.entries.len());
             position_centered_overlay(&ctx, content);
             self.last_viewport_content = content;
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
@@ -151,11 +151,7 @@ impl MarksSwitcherPanel {
             self.measured_size = output.content_size;
         }
 
-        let content = capped_content_size(
-            &ctx,
-            self.measured_size,
-            self.controller.entries.len(),
-        );
+        let content = capped_content_size(&ctx, self.measured_size, self.controller.entries.len());
         if content != self.last_viewport_content {
             self.last_viewport_content = content;
             position_centered_overlay(&ctx, content);

@@ -42,13 +42,16 @@ pub fn resolve_identity<'a>(
         .iter()
         .filter(|w| w.exe_path == identity.exe && w.title == identity.title)
         .collect();
-    if exact.len() == 1 {
-        log::debug("resolve_identity: exact match");
-        return Some(exact[0]);
-    }
-    if !exact.is_empty() {
-        log::debug(format!("resolve_identity: {} exact matches, using first", exact.len()));
-        return Some(exact[0]);
+    if let Some((&first, rest)) = exact.split_first() {
+        if rest.is_empty() {
+            log::debug("resolve_identity: exact match");
+        } else {
+            log::debug(format!(
+                "resolve_identity: {} exact matches, using first",
+                rest.len().saturating_add(1)
+            ));
+        }
+        return Some(first);
     }
 
     let result = windows
@@ -59,15 +62,17 @@ pub fn resolve_identity<'a>(
     if result.is_some() {
         log::debug("resolve_identity: fuzzy match");
     } else {
-        log::warn(format!("resolve_identity: no match for {}", identity.display_label()));
+        log::warn(format!(
+            "resolve_identity: no match for {}",
+            identity.display_label()
+        ));
     }
     result
 }
 
 pub fn identities_match(stored: &WindowIdentity, live: &WindowIdentity) -> bool {
     stored == live
-        || (paths_match(&stored.exe, &live.exe)
-            && title_score(&live.title, &stored.title) > 0)
+        || (paths_match(&stored.exe, &live.exe) && title_score(&live.title, &stored.title) > 0)
 }
 
 fn paths_match(a: &Path, b: &Path) -> bool {
@@ -117,7 +122,10 @@ mod tests {
     #[test]
     fn exact_match_wins() {
         let wins = vec![win(1, r"C:\a.exe", "Doc"), win(2, r"C:\b.exe", "Doc")];
-        assert_eq!(resolve_identity(&id(r"C:\a.exe", "Doc"), &wins).map(|w| w.hwnd), Some(1));
+        assert_eq!(
+            resolve_identity(&id(r"C:\a.exe", "Doc"), &wins).map(|w| w.hwnd),
+            Some(1)
+        );
     }
 
     #[test]

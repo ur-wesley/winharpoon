@@ -5,8 +5,8 @@ use parking_lot::Mutex;
 use windows::Win32::Foundation::{LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, GetDoubleClickTime, VK_CONTROL, VK_LCONTROL, VK_LMENU, VK_LWIN, VK_MENU,
-    VK_RCONTROL, VK_LSHIFT, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SHIFT,
+    GetDoubleClickTime, VK_CONTROL, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU,
+    VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SHIFT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, GetCursorPos, SetWindowsHookExW, UnhookWindowsHookEx, HHOOK, MSLLHOOKSTRUCT,
@@ -14,7 +14,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::config::{Config, DoubleTapModifier};
-use crate::hotkeys::hotkey_hwnd;
 use crate::log;
 use crate::window::foreground_is_fullscreen;
 
@@ -68,14 +67,13 @@ pub fn ensure_installed() {
         return;
     }
     unsafe {
-        let hook = SetWindowsHookExW(
-            WH_MOUSE_LL,
-            Some(mouse_proc),
-            Some(GetModuleHandleW(None).unwrap().into()),
-            0,
-        );
+        let Ok(module) = GetModuleHandleW(None) else {
+            log::error("apps: mouse hook install failed: no module handle");
+            return;
+        };
+        let hook = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), Some(module.into()), 0);
         if let Ok(hook) = hook {
-            HOOK.store(hook.0 as *mut _, Ordering::Release);
+            HOOK.store(hook.0, Ordering::Release);
             *STATE.lock() = Some(HookState {
                 config: HookConfig {
                     enabled: true,
@@ -107,8 +105,8 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
     if code >= 0 {
         if let Some(state) = STATE.lock().as_mut() {
             if state.config.enabled {
-                let msg = wparam.0 as u32;
-                let info = *(lparam.0 as *const MSLLHOOKSTRUCT);
+                let msg = crate::win_cast::wparam_to_u32(wparam);
+                let info = *crate::win_cast::lparam_to_const_ptr::<MSLLHOOKSTRUCT>(lparam);
                 if msg == WM_LBUTTONDBLCLK {
                     maybe_open_menu(state, info.pt.x, info.pt.y);
                 } else if msg == WM_LBUTTONDOWN {
@@ -117,7 +115,12 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
             }
         }
     }
-    CallNextHookEx(Some(HHOOK(HOOK.load(Ordering::Acquire))), code, wparam, lparam)
+    CallNextHookEx(
+        Some(HHOOK(HOOK.load(Ordering::Acquire))),
+        code,
+        wparam,
+        lparam,
+    )
 }
 
 pub fn try_alt_double_tap(vk: u32, key_up: bool) {
@@ -137,10 +140,7 @@ pub fn try_alt_double_tap(vk: u32, key_up: bool) {
         return;
     }
 
-    let enabled = STATE
-        .lock()
-        .as_ref()
-        .is_some_and(|s| s.config.enabled);
+    let enabled = STATE.lock().as_ref().is_some_and(|s| s.config.enabled);
     if !enabled || other_modifiers_held(modifier) {
         tracker.mod_is_down = false;
         tracker.press_time = None;
@@ -198,9 +198,9 @@ fn handle_click(state: &mut HookState, x: i32, y: i32) {
     let threshold = unsafe { GetDoubleClickTime() };
     let is_double = state
         .last_click
-        .is_some_and(|t| now.duration_since(t).as_millis() <= threshold as u128)
-        && (x - state.last_pos.0).abs() <= 8
-        && (y - state.last_pos.1).abs() <= 8;
+        .is_some_and(|t| now.duration_since(t).as_millis() <= u128::from(threshold))
+        && x.saturating_sub(state.last_pos.0).abs() <= 8
+        && y.saturating_sub(state.last_pos.1).abs() <= 8;
 
     state.last_click = Some(now);
     state.last_pos = (x, y);
@@ -218,68 +218,40 @@ fn maybe_open_menu(state: &HookState, x: i32, y: i32) {
     post_app_menu(x, y);
 }
 
+/// Virtual-key group (base key plus left/right variants) for a tap modifier.
+///
+/// Shared by the held-state query and the vk classification below so the
+/// four groups exist in exactly one place. Win has no third variant; its
+/// slot repeats `VK_RWIN`, which is harmless for `contains`/`any` checks.
+fn modifier_vk_group(modifier: DoubleTapModifier) -> [u16; 3] {
+    match modifier {
+        DoubleTapModifier::Alt => [VK_MENU.0, VK_LMENU.0, VK_RMENU.0],
+        DoubleTapModifier::Ctrl => [VK_CONTROL.0, VK_LCONTROL.0, VK_RCONTROL.0],
+        DoubleTapModifier::Shift => [VK_SHIFT.0, VK_LSHIFT.0, VK_RSHIFT.0],
+        DoubleTapModifier::Win => [VK_LWIN.0, VK_RWIN.0, VK_RWIN.0],
+    }
+}
+
 fn modifier_held(modifier: DoubleTapModifier) -> bool {
-    unsafe fn down(vk: i32) -> bool {
-        GetAsyncKeyState(vk) as u16 & 0x8000 != 0
-    }
-    unsafe {
-        match modifier {
-            DoubleTapModifier::Alt => {
-                down(VK_MENU.0 as i32) || down(VK_LMENU.0 as i32) || down(VK_RMENU.0 as i32)
-            }
-            DoubleTapModifier::Ctrl => {
-                down(VK_CONTROL.0 as i32)
-                    || down(VK_LCONTROL.0 as i32)
-                    || down(VK_RCONTROL.0 as i32)
-            }
-            DoubleTapModifier::Shift => {
-                down(VK_SHIFT.0 as i32) || down(VK_LSHIFT.0 as i32) || down(VK_RSHIFT.0 as i32)
-            }
-            DoubleTapModifier::Win => {
-                down(VK_LWIN.0 as i32) || down(VK_RWIN.0 as i32)
-            }
-        }
-    }
+    crate::util::any_vk_down(&modifier_vk_group(modifier))
 }
 
 fn is_modifier_vk(vk: u32, modifier: DoubleTapModifier) -> bool {
-    match modifier {
-        DoubleTapModifier::Alt => {
-            matches!(vk, v if v == VK_MENU.0 as u32 || v == VK_LMENU.0 as u32 || v == VK_RMENU.0 as u32)
-        }
-        DoubleTapModifier::Ctrl => matches!(
-            vk,
-            v if v == VK_CONTROL.0 as u32 || v == VK_LCONTROL.0 as u32 || v == VK_RCONTROL.0 as u32
-        ),
-        DoubleTapModifier::Shift => matches!(
-            vk,
-            v if v == VK_SHIFT.0 as u32 || v == VK_LSHIFT.0 as u32 || v == VK_RSHIFT.0 as u32
-        ),
-        DoubleTapModifier::Win => {
-            matches!(vk, v if v == VK_LWIN.0 as u32 || v == VK_RWIN.0 as u32)
-        }
-    }
+    modifier_vk_group(modifier).contains(&u16::try_from(vk).unwrap_or(0))
 }
 
 fn other_modifiers_held(modifier: DoubleTapModifier) -> bool {
-    unsafe fn down(vk: i32) -> bool {
-        GetAsyncKeyState(vk) as u16 & 0x8000 != 0
-    }
-    unsafe {
-        let alt = down(VK_MENU.0 as i32) || down(VK_LMENU.0 as i32) || down(VK_RMENU.0 as i32);
-        let ctrl = down(VK_CONTROL.0 as i32)
-            || down(VK_LCONTROL.0 as i32)
-            || down(VK_RCONTROL.0 as i32);
-        let shift =
-            down(VK_SHIFT.0 as i32) || down(VK_LSHIFT.0 as i32) || down(VK_RSHIFT.0 as i32);
-        let win = down(VK_LWIN.0 as i32) || down(VK_RWIN.0 as i32);
+    use crate::util::any_vk_down;
+    let alt = any_vk_down(&modifier_vk_group(DoubleTapModifier::Alt));
+    let ctrl = any_vk_down(&modifier_vk_group(DoubleTapModifier::Ctrl));
+    let shift = any_vk_down(&modifier_vk_group(DoubleTapModifier::Shift));
+    let win = any_vk_down(&modifier_vk_group(DoubleTapModifier::Win));
 
-        match modifier {
-            DoubleTapModifier::Alt => ctrl || shift || win,
-            DoubleTapModifier::Ctrl => alt || shift || win,
-            DoubleTapModifier::Shift => alt || ctrl || win,
-            DoubleTapModifier::Win => alt || ctrl || shift,
-        }
+    match modifier {
+        DoubleTapModifier::Alt => ctrl || shift || win,
+        DoubleTapModifier::Ctrl => alt || shift || win,
+        DoubleTapModifier::Shift => alt || ctrl || win,
+        DoubleTapModifier::Win => alt || ctrl || shift,
     }
 }
 
@@ -304,18 +276,11 @@ fn post_app_menu(x: i32, y: i32) {
         return;
     }
 
-    let Some(hwnd) = hotkey_hwnd() else {
-        return;
-    };
-    unsafe {
-        use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
-        let _ = PostMessageW(
-            Some(hwnd),
-            crate::hotkeys::wm_app_menu(),
-            WPARAM(x as usize),
-            LPARAM(y as isize),
-        );
-    }
+    let _ = crate::hotkeys::post_hotkey_message(
+        crate::hotkeys::wm_app_menu(),
+        WPARAM(crate::win_cast::i32_to_usize_bits(x)),
+        LPARAM(crate::win_cast::i32_to_isize_bits(y)),
+    );
     log::debug(format!("apps: modifier double-click at ({x},{y})"));
 }
 

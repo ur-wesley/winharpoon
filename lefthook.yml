@@ -1,0 +1,14 @@
+# Git hooks (lefthook). Install once per clone: `mise run setup`
+# (or `lefthook install` with your own binary).
+min_version: 1.7.0
+
+pre-commit:
+  parallel: true
+  commands:
+    formatting:
+      run: cargo fmt
+      stage_fixed: true
+    line-count:
+      run: cargo test --test max_lines
+    lint:
+      run: cargo clippy --all-targets -- -D warnings

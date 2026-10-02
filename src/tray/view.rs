@@ -17,10 +17,7 @@ pub struct TrayMenuViewOutput {
     pub content_size: egui::Vec2,
 }
 
-pub fn render_tray_menu(
-    ui: &mut egui::Ui,
-    state: &Arc<Mutex<AppState>>,
-) -> TrayMenuViewOutput {
+pub fn render_tray_menu(ui: &mut egui::Ui, state: &Arc<Mutex<AppState>>) -> TrayMenuViewOutput {
     let conflicts = state.lock().hotkey_conflicts;
     let slot_labels: Vec<(u8, String, bool)> = {
         let state_guard = state.lock();
@@ -71,11 +68,7 @@ pub fn render_tray_menu(
         native_ui::tray_menu_section_label(ui, "Marked slots");
 
         for (slot, label, filled) in &slot_labels {
-            let subtitle = if *filled {
-                label.as_str()
-            } else {
-                "Empty"
-            };
+            let subtitle = if *filled { label.as_str() } else { "Empty" };
             let response = slot_row(
                 ui,
                 &SlotRowProps {

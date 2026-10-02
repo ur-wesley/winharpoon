@@ -1,7 +1,7 @@
 use eframe::egui;
 
-use crate::native_ui;
 use super::selection_bar::{paint_hover_card_highlight, primary_list_text_color};
+use crate::native_ui;
 
 pub const LIST_ICON_SIZE: f32 = 20.0;
 const LIST_ROW_HEIGHT: f32 = 28.0;
@@ -37,12 +37,10 @@ pub fn searchable_list_row(
     let row_width = ui.available_width();
     let frame = native_ui::overlay_card_frame(keyboard_highlight, props.active_border);
     ui.set_width(row_width);
-    let card_response = frame.show(ui, |ui| {
+    let inner = frame.show(ui, |ui| {
         let width = ui.available_width();
-        let (rect, response) = ui.allocate_exact_size(
-            egui::vec2(width, LIST_ROW_HEIGHT),
-            egui::Sense::click(),
-        );
+        let (rect, response) =
+            ui.allocate_exact_size(egui::vec2(width, LIST_ROW_HEIGHT), egui::Sense::click());
         if ui.is_rect_visible(rect) {
             let text_left = props.icon.map_or(rect.min.x, |texture| {
                 let icon_rect = egui::Rect::from_center_size(
@@ -101,7 +99,11 @@ pub fn searchable_list_row(
         response
     });
 
-    let hovered = card_response.response.hovered();
+    let click_response = inner.inner;
+    let frame_rect = inner.response.rect;
+    let row_rect = click_response.rect.union(frame_rect);
+
+    let hovered = click_response.hovered() || inner.response.hovered();
     let highlight = if hovered {
         RowHighlight::Hover
     } else {
@@ -110,16 +112,15 @@ pub fn searchable_list_row(
     let highlighted = highlight != RowHighlight::None;
 
     if hovered && !keyboard_highlight {
-        paint_hover_card_highlight(ui.painter(), card_response.response.rect);
+        paint_hover_card_highlight(ui.painter(), row_rect);
     }
 
-    if highlighted
-        && props.scroll_to {
-            ui.scroll_to_rect(card_response.response.rect, Some(egui::Align::Center));
-        }
+    if highlighted && props.scroll_to {
+        ui.scroll_to_rect(row_rect, Some(egui::Align::Center));
+    }
 
     SearchableListRowResponse {
-        response: card_response.response,
+        response: click_response,
         highlight,
     }
 }

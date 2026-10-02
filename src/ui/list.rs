@@ -10,14 +10,31 @@ impl ListSelection {
         self.hovered.unwrap_or(self.selected)
     }
 
+    /// Mouse hover takes over the selection so keyboard nav continues from
+    /// the hovered row and Enter/click launch the same index.
+    pub fn hover(&mut self, row: usize, len: usize) {
+        if row >= len {
+            return;
+        }
+        if self.selected != row {
+            self.selected = row;
+            self.scroll_to_selected = false;
+        }
+        self.hovered = None;
+    }
+
     pub fn navigate(&mut self, len: usize, delta: i32) {
         if len == 0 {
             return;
         }
         // Support multi-row jumps (PageUp/PageDown) with wrapping.
-        let len_i = len as i32;
-        let next = (self.selected as i32 + delta).rem_euclid(len_i);
-        self.selected = next as usize;
+        let len_i = i32::try_from(len).unwrap_or(0);
+        if len_i <= 0 {
+            return;
+        }
+        let current = i32::try_from(self.selected).unwrap_or(0);
+        let next = current.saturating_add(delta).rem_euclid(len_i);
+        self.selected = usize::try_from(next).unwrap_or(0);
         self.hovered = None;
         self.scroll_to_selected = true;
     }
@@ -80,6 +97,26 @@ mod tests {
         assert_eq!(sel.selected, 0);
         assert!(sel.scroll_to_selected);
         assert_eq!(sel.hovered, None);
+    }
+
+    #[test]
+    fn hover_moves_selection_for_keyboard_nav() {
+        let mut sel = ListSelection::default();
+        sel.hover(2, 5);
+        assert_eq!(sel.selected, 2);
+        assert_eq!(sel.hovered, None);
+        assert_eq!(sel.active_row(), 2);
+        // Mouse hover must not trigger a scroll jump; keyboard nav does.
+        assert!(!sel.scroll_to_selected);
+        sel.navigate(5, 1);
+        assert_eq!(sel.selected, 3);
+    }
+
+    #[test]
+    fn hover_ignores_out_of_range() {
+        let mut sel = ListSelection::default();
+        sel.hover(9, 3);
+        assert_eq!(sel.selected, 0);
     }
 
     #[test]

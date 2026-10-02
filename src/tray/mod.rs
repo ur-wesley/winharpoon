@@ -12,20 +12,29 @@ use crate::app::AppState;
 use crate::launcher::{open_tray_menu, TrayClickInfo};
 use crate::log;
 
-pub fn init_tray(state: &Arc<Mutex<AppState>>) -> TrayIcon {
+pub fn init_tray(state: &Arc<Mutex<AppState>>) -> Option<TrayIcon> {
     log::debug("init_tray");
-    let icon = tray_icon().expect("tray icon");
     let tooltip = tray_tooltip(state);
 
-    let tray = TrayIconBuilder::new()
-        .with_tooltip(tooltip)
-        .with_icon(icon)
-        .build()
-        .expect("tray icon");
+    let builder = TrayIconBuilder::new().with_tooltip(tooltip);
+    let builder = if let Some(icon) = tray_icon() {
+        builder.with_icon(icon)
+    } else {
+        log::warn("tray icon unavailable, continuing without icon");
+        builder
+    };
 
-    tray.set_show_menu_on_left_click(false);
-    log::debug("tray icon created");
-    tray
+    match builder.build() {
+        Ok(tray) => {
+            tray.set_show_menu_on_left_click(false);
+            log::debug("tray icon created");
+            Some(tray)
+        }
+        Err(err) => {
+            log::error(format!("tray icon build failed: {err:?}"));
+            None
+        }
+    }
 }
 
 pub fn drain_tray_events() {
@@ -44,10 +53,7 @@ pub fn drain_tray_events() {
             if !matches!(button, MouseButton::Left | MouseButton::Right) {
                 continue;
             }
-            log::debug(format!(
-                "tray click at ({}, {})",
-                position.x, position.y
-            ));
+            log::debug(format!("tray click at ({}, {})", position.x, position.y));
             open_tray_menu(TrayClickInfo {
                 click_x: position.x,
                 click_y: position.y,

@@ -3,10 +3,8 @@ use std::path::{Path, PathBuf};
 
 use windows::core::{Interface, PCWSTR};
 use windows::Win32::Foundation::MAX_PATH;
-use windows::Win32::System::Com::{
-    CoCreateInstance, IPersistFile, CLSCTX_INPROC_SERVER,
-};
 use windows::Win32::System::Com::STGM;
+use windows::Win32::System::Com::{CoCreateInstance, IPersistFile, CLSCTX_INPROC_SERVER};
 use windows::Win32::UI::Shell::{IShellLinkW, ShellLink, SLGP_RAWPATH};
 
 use crate::log;
@@ -47,7 +45,11 @@ fn merge_sources(parts: Vec<Vec<AppEntry>>) -> Vec<AppEntry> {
     out
 }
 
-fn merge_into(out: &mut Vec<AppEntry>, by_key: &mut HashMap<String, usize>, incoming: Vec<AppEntry>) {
+fn merge_into(
+    out: &mut Vec<AppEntry>,
+    by_key: &mut HashMap<String, usize>,
+    incoming: Vec<AppEntry>,
+) {
     for entry in incoming {
         let key = entry.id.clone();
         if let Some(&idx) = by_key.get(&key) {
@@ -61,7 +63,9 @@ fn merge_into(out: &mut Vec<AppEntry>, by_key: &mut HashMap<String, usize>, inco
                 if existing.target.as_os_str().is_empty() && !entry.target.as_os_str().is_empty() {
                     existing.target = entry.target;
                 }
-                if existing.source_lnk.as_os_str().is_empty() && !entry.source_lnk.as_os_str().is_empty() {
+                if existing.source_lnk.as_os_str().is_empty()
+                    && !entry.source_lnk.as_os_str().is_empty()
+                {
                     existing.source_lnk = entry.source_lnk;
                 }
                 if existing.args.is_empty() && !entry.args.is_empty() {
@@ -139,11 +143,11 @@ fn extract_aumid_from_args(args: &str) -> Option<String> {
     let lower = args.to_ascii_lowercase();
     let marker = "shell:appsfolder\\";
     let idx = lower.find(marker)?;
-    let rest = &args[idx + marker.len()..];
+    let rest = args.get(idx.saturating_add(marker.len())..)?;
     let end = rest
         .find(|c: char| c.is_whitespace() || c == '"')
         .unwrap_or(rest.len());
-    let candidate = rest[..end].trim().to_string();
+    let candidate = rest.get(..end).unwrap_or_default().trim().to_string();
     if candidate.is_empty() || !candidate.contains('!') {
         None
     } else {
@@ -159,7 +163,10 @@ fn collect_links(dir: &Path, out: &mut Vec<PathBuf>) {
         let path = entry.path();
         if path.is_dir() {
             collect_links(&path, out);
-        } else if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("lnk")) {
+        } else if path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("lnk"))
+        {
             out.push(path);
         }
     }
@@ -196,13 +203,13 @@ pub fn expand_env(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut rest = s;
     while let Some(start) = rest.find('%') {
-        out.push_str(&rest[..start]);
-        let after = &rest[start + 1..];
+        out.push_str(rest.get(..start).unwrap_or_default());
+        let after = rest.get(start.saturating_add(1)..).unwrap_or_default();
         let Some(end) = after.find('%') else {
-            out.push_str(&rest[start..]);
+            out.push_str(rest.get(start..).unwrap_or_default());
             return out;
         };
-        let name = &after[..end];
+        let name = after.get(..end).unwrap_or_default();
         if let Ok(value) = std::env::var(name) {
             out.push_str(&value);
         } else {
@@ -210,7 +217,7 @@ pub fn expand_env(s: &str) -> String {
             out.push_str(name);
             out.push('%');
         }
-        rest = &after[end + 1..];
+        rest = after.get(end.saturating_add(1)..).unwrap_or_default();
     }
     out.push_str(rest);
     out
@@ -219,7 +226,7 @@ pub fn expand_env(s: &str) -> String {
 pub fn fnv1a(s: &str) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
     for b in s.bytes() {
-        hash ^= b as u64;
+        hash ^= u64::from(b);
         hash = hash.wrapping_mul(0x0100_0000_01b3);
     }
     hash
@@ -227,17 +234,16 @@ pub fn fnv1a(s: &str) -> u64 {
 
 fn resolve_lnk(path: &Path) -> Option<(PathBuf, String)> {
     unsafe {
-        let link: IShellLinkW =
-            CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
+        let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
         let file: IPersistFile = link.cast().ok()?;
         let wide = util::wide(&path.to_string_lossy());
         file.Load(PCWSTR(wide.as_ptr()), STGM(0)).ok()?;
 
-        let mut target_buf = [0u16; MAX_PATH as usize];
+        let mut target_buf = vec![0u16; usize::try_from(MAX_PATH).unwrap_or(0)];
         link.GetPath(
             &mut target_buf,
             std::ptr::null_mut(),
-            SLGP_RAWPATH.0 as u32,
+            u32::try_from(SLGP_RAWPATH.0).unwrap_or(0),
         )
         .ok()?;
         let target = PathBuf::from(util::from_wide(&target_buf));
@@ -288,11 +294,7 @@ mod tests {
     #[test]
     fn unexpanded_env_target_matches_expanded() {
         let root = std::env::var("SystemRoot").expect("SystemRoot must exist on Windows");
-        let a = entry_id(
-            Path::new(r"%SystemRoot%\system32\notepad.exe"),
-            None,
-            "",
-        );
+        let a = entry_id(Path::new(r"%SystemRoot%\system32\notepad.exe"), None, "");
         let b = entry_id(
             Path::new(&format!("{root}\\system32\\notepad.exe")),
             None,
@@ -303,8 +305,16 @@ mod tests {
 
     #[test]
     fn different_args_stay_distinct() {
-        let a = entry_id(Path::new(r"C:\Windows\system32\cmd.exe"), None, "/k one.bat");
-        let b = entry_id(Path::new(r"C:\Windows\system32\cmd.exe"), None, "/k other.bat");
+        let a = entry_id(
+            Path::new(r"C:\Windows\system32\cmd.exe"),
+            None,
+            "/k one.bat",
+        );
+        let b = entry_id(
+            Path::new(r"C:\Windows\system32\cmd.exe"),
+            None,
+            "/k other.bat",
+        );
         let c = entry_id(Path::new(r"C:\Windows\system32\cmd.exe"), None, "");
         assert_ne!(a, b);
         assert_ne!(a, c);
@@ -313,8 +323,16 @@ mod tests {
 
     #[test]
     fn aumid_identity_is_case_insensitive() {
-        let a = entry_id(Path::new(""), Some("Microsoft.WindowsNotepad_8wekyb3d8bbwe!App"), "");
-        let b = entry_id(Path::new(""), Some("microsoft.windowsnotepad_8wekyb3d8bbwe!app"), "");
+        let a = entry_id(
+            Path::new(""),
+            Some("Microsoft.WindowsNotepad_8wekyb3d8bbwe!App"),
+            "",
+        );
+        let b = entry_id(
+            Path::new(""),
+            Some("microsoft.windowsnotepad_8wekyb3d8bbwe!app"),
+            "",
+        );
         assert_eq!(a, b);
     }
 
@@ -338,7 +356,11 @@ mod tests {
     #[test]
     fn merge_sources_keeps_arg_variants() {
         let one = test_entry(
-            &entry_id(Path::new(r"C:\Windows\system32\cmd.exe"), None, "/k one.bat"),
+            &entry_id(
+                Path::new(r"C:\Windows\system32\cmd.exe"),
+                None,
+                "/k one.bat",
+            ),
             "One",
             r"C:\Windows\system32\cmd.exe",
             "/k one.bat",
@@ -347,7 +369,11 @@ mod tests {
         let mut other = one.clone();
         other.name = "Other".into();
         other.args = "/k other.bat".into();
-        other.id = entry_id(Path::new(r"C:\Windows\system32\cmd.exe"), None, "/k other.bat");
+        other.id = entry_id(
+            Path::new(r"C:\Windows\system32\cmd.exe"),
+            None,
+            "/k other.bat",
+        );
 
         let merged = merge_sources(vec![vec![one, other]]);
         assert_eq!(merged.len(), 2);

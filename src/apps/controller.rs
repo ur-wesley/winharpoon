@@ -117,7 +117,9 @@ impl AppMenuController {
                 self.selection.navigate(self.rows.len(), delta);
             }
             AppMenuAction::Hover(hovered) => {
-                self.selection.hovered = hovered;
+                if let Some(row) = hovered {
+                    self.selection.hover(row, self.rows.len());
+                }
             }
             AppMenuAction::Launch(idx) => {
                 if let Some(row) = self.rows.get(idx) {
@@ -213,7 +215,7 @@ pub fn build_app_rows(
         out
     } else {
         let labels: Vec<_> = all.iter().map(|e| e.search_label.as_str()).collect();
-        let mut ranked = search.rank(query, &labels, max_results * 4);
+        let mut ranked = search.rank(query, &labels, max_results.saturating_mul(4));
         sort_ranked_favorites_first(&mut ranked, all, &fav_set);
         ranked.truncate(max_results);
         ranked
@@ -237,8 +239,12 @@ pub fn sort_ranked_favorites_first(
     fav_set: &HashSet<&str>,
 ) {
     ranked.sort_by(|a, b| {
-        let fav_a = fav_set.contains(all[a.0].id.as_str());
-        let fav_b = fav_set.contains(all[b.0].id.as_str());
+        let fav_a = all
+            .get(a.0)
+            .is_some_and(|e| fav_set.contains(e.id.as_str()));
+        let fav_b = all
+            .get(b.0)
+            .is_some_and(|e| fav_set.contains(e.id.as_str()));
         fav_b.cmp(&fav_a).then_with(|| b.1.cmp(&a.1))
     });
 }
@@ -338,7 +344,13 @@ mod tests {
                 target: String::new(),
             }],
         };
-        let rows = build_app_rows("chromium", 16, &all, &favorites, &mut FuzzySearch::default());
+        let rows = build_app_rows(
+            "chromium",
+            16,
+            &all,
+            &favorites,
+            &mut FuzzySearch::default(),
+        );
         assert!(!rows.is_empty());
         assert_eq!(rows[0].entry.id, "b");
     }

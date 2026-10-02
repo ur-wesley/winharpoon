@@ -20,9 +20,12 @@ pub fn hide_overlay_viewport(ctx: &egui::Context) {
 
 pub fn position_overlay_at(ctx: &egui::Context, pos: egui::Pos2, content: egui::Vec2) {
     let size = crate::native_ui::overlay_viewport_size(content);
-    let inset = (size - content) / 2.0;
+    let inset = egui::vec2((size.x - content.x) / 2.0, (size.y - content.y) / 2.0);
     ctx.send_viewport_cmd(egui::ViewportCommand::Transparent(true));
-    ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos - inset));
+    ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(
+        pos.x - inset.x,
+        pos.y - inset.y,
+    )));
     ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
 }
@@ -35,8 +38,16 @@ pub fn position_centered_overlay(ctx: &egui::Context, content: egui::Vec2) {
     // size, which is stale here — the window is shared between popups of different
     // sizes (launcher ~440px vs switcher ~1000px), so centering lagged one resize
     // behind and froze off-center with the right edge hanging off-screen.
-    // Compute from the NEW size instead; idempotent, converges exactly.
-    let pos = ctx.input(|i| {
+    // Compute from the NEW size instead, centered on the active monitor
+    // (foreground window, else cursor) instead of always the main monitor.
+    // Idempotent, converges exactly.
+    let work_area = crate::platform::active_monitor_work_area(ctx);
+    let pos = crate::platform::center_in_work_area(work_area, size);
+    // Fallback path (e.g. zero work area on headless/test): keep old main-monitor
+    // math so we never park the popup at an invalid position.
+    if work_area.width() > 1.0 && work_area.height() > 1.0 {
+        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
+    } else if let Some(fallback) = ctx.input(|i| {
         i.viewport().monitor_size.and_then(|m| {
             if m.x > 1.0 && m.y > 1.0 {
                 Some(egui::pos2((m.x - size.x) / 2.0, (m.y - size.y) / 2.0))
@@ -44,9 +55,8 @@ pub fn position_centered_overlay(ctx: &egui::Context, content: egui::Vec2) {
                 None
             }
         })
-    });
-    if let Some(pos) = pos {
-        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
+    }) {
+        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(fallback));
     }
     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
 }

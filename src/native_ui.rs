@@ -12,7 +12,8 @@ pub const POPUP_CARD: egui::Color32 = egui::Color32::from_rgba_premultiplied(4, 
 pub const POPUP_CARD_HOVER: egui::Color32 = egui::Color32::from_rgba_premultiplied(10, 10, 14, 80);
 pub const POPUP_INSET: egui::Color32 = egui::Color32::from_rgba_premultiplied(0, 0, 0, 40);
 pub const GLASS_KEYCAP: egui::Color32 = egui::Color32::from_rgba_premultiplied(16, 16, 16, 16);
-pub const GLASS_KEYCAP_BORDER: egui::Color32 = egui::Color32::from_rgba_premultiplied(30, 30, 30, 30);
+pub const GLASS_KEYCAP_BORDER: egui::Color32 =
+    egui::Color32::from_rgba_premultiplied(30, 30, 30, 30);
 pub const BORDER: egui::Color32 = GLASS_BORDER;
 pub const TEXT_MUTED: egui::Color32 = egui::Color32::from_rgb(148, 156, 178);
 pub const TEXT_DIM: egui::Color32 = egui::Color32::from_rgb(108, 116, 138);
@@ -46,11 +47,8 @@ pub fn overlay_viewport_size(content: egui::Vec2) -> egui::Vec2 {
     // would otherwise be clipped by the window edge. Transparent and invisible.
     const EDGE_SLACK: f32 = 3.0;
     let bleed = OVERLAY_SHADOW_BLEED * 2.0;
-    content
-        + egui::vec2(
-            OVERLAY_INNER_MARGIN + bleed + EDGE_SLACK,
-            OVERLAY_INNER_MARGIN + bleed + EDGE_SLACK,
-        )
+    let pad = OVERLAY_INNER_MARGIN + bleed + EDGE_SLACK;
+    egui::vec2(content.x + pad, content.y + pad)
 }
 
 /// Full advance width of the marks card row, including trailing slack so the
@@ -60,7 +58,7 @@ pub fn marks_row_width(count: usize) -> f32 {
     if count == 0 {
         0.0
     } else {
-        let count = count as f32;
+        let count = crate::win_cast::usize_to_f32(count);
         count * MARKS_CARD_WIDTH + (count - 1.0) * MARKS_CARD_GAP + MARKS_ROW_END_SLACK
     }
 }
@@ -188,22 +186,18 @@ pub fn section_frame() -> egui::Frame {
 }
 
 pub fn tray_menu_divider(ui: &mut egui::Ui) {
-    let rect = ui.allocate_exact_size(egui::vec2(ui.available_width(), 5.0), egui::Sense::hover()).1.rect;
-    let line = egui::Rect::from_center_size(
-        rect.center(),
-        egui::vec2(rect.width() - 6.0, 1.0),
-    );
-    ui.painter().rect_filled(line, 0.0, GLASS_BORDER.gamma_multiply(0.55));
+    let rect = ui
+        .allocate_exact_size(egui::vec2(ui.available_width(), 5.0), egui::Sense::hover())
+        .1
+        .rect;
+    let line = egui::Rect::from_center_size(rect.center(), egui::vec2(rect.width() - 6.0, 1.0));
+    ui.painter()
+        .rect_filled(line, 0.0, GLASS_BORDER.gamma_multiply(0.55));
 }
 
 pub fn tray_menu_section_label(ui: &mut egui::Ui, text: &str) {
     ui.add_space(1.0);
-    ui.label(
-        egui::RichText::new(text)
-            .size(9.5)
-            .strong()
-            .color(TEXT_DIM),
-    );
+    ui.label(egui::RichText::new(text).size(9.5).strong().color(TEXT_DIM));
     ui.add_space(1.0);
 }
 
@@ -223,13 +217,8 @@ pub fn tray_menu_clipped_label(
     layout_job.wrap.max_rows = 1;
     layout_job.wrap.break_anywhere = true;
     let galley = ui.fonts_mut(|fonts| fonts.layout_job(layout_job));
-    let pos = egui::pos2(
-        rect.min.x,
-        rect.center().y - galley.size().y * 0.5,
-    );
-    ui.painter()
-        .with_clip_rect(rect)
-        .galley(pos, galley, color);
+    let pos = egui::pos2(rect.min.x, rect.center().y - galley.size().y * 0.5);
+    ui.painter().with_clip_rect(rect).galley(pos, galley, color);
 }
 
 pub fn overlay_panel_frame() -> egui::Frame {
@@ -251,10 +240,12 @@ pub fn render_overlay_shell<R>(
     ui: &mut egui::Ui,
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> (R, egui::Rect) {
-    let mut result = None;
     let mut panel_rect = egui::Rect::NOTHING;
-    let margin = f32::midpoint(OVERLAY_INNER_MARGIN, OVERLAY_SHADOW_BLEED * 2.0) as i8;
-    egui::CentralPanel::default()
+    // OVERLAY_SHADOW_BLEED is 0.0 on Windows and 8.0 elsewhere; the shell
+    // margin is exactly that bleed in whole pixels (`Margin` takes `i8`,
+    // and float-to-int has no exact std conversion).
+    let margin: i8 = if OVERLAY_SHADOW_BLEED > 0.0 { 8 } else { 0 };
+    let output = egui::CentralPanel::default()
         .frame(
             egui::Frame::NONE
                 .fill(egui::Color32::TRANSPARENT)
@@ -263,9 +254,9 @@ pub fn render_overlay_shell<R>(
         .show_inside(ui, |ui| {
             let inner = show_popup_panel(ui, add_contents);
             panel_rect = inner.response.rect;
-            result = Some(inner.inner);
+            inner.inner
         });
-    (result.expect("overlay shell"), panel_rect)
+    (output.inner, panel_rect)
 }
 
 pub fn render_popup_layout<R>(
@@ -281,13 +272,12 @@ pub fn render_popup_layout<R>(
 }
 
 pub fn popup_hint_footer(id: &'static str) -> egui::Panel {
-    egui::Panel::bottom(id)
-        .frame(
-            egui::Frame::NONE
-                .fill(POPUP_PANEL)
-                .stroke(egui::Stroke::new(1.0, GLASS_BORDER))
-                .inner_margin(egui::Margin::symmetric(10, 8)),
-        )
+    egui::Panel::bottom(id).frame(
+        egui::Frame::NONE
+            .fill(POPUP_PANEL)
+            .stroke(egui::Stroke::new(1.0, GLASS_BORDER))
+            .inner_margin(egui::Margin::symmetric(10, 8)),
+    )
 }
 
 pub fn overlay_card_frame(selected: bool, active: bool) -> egui::Frame {
@@ -302,10 +292,7 @@ pub fn overlay_card_frame(selected: bool, active: bool) -> egui::Frame {
             egui::Stroke::new(1.0, SUCCESS.gamma_multiply(0.45)),
         )
     } else {
-        (
-            POPUP_CARD,
-            egui::Stroke::new(1.0, GLASS_BORDER),
-        )
+        (POPUP_CARD, egui::Stroke::new(1.0, GLASS_BORDER))
     };
     egui::Frame::NONE
         .fill(fill)
@@ -315,11 +302,7 @@ pub fn overlay_card_frame(selected: bool, active: bool) -> egui::Frame {
 }
 
 pub fn muted_label(ui: &mut egui::Ui, text: &str) {
-    ui.label(
-        egui::RichText::new(text)
-            .size(12.5)
-            .color(TEXT_MUTED),
-    );
+    ui.label(egui::RichText::new(text).size(12.5).color(TEXT_MUTED));
 }
 
 pub fn section_heading(ui: &mut egui::Ui, title: &str, subtitle: &str) {
@@ -342,18 +325,15 @@ pub fn badge(ui: &mut egui::Ui, text: &str, color: egui::Color32) {
         .corner_radius(6)
         .inner_margin(egui::Margin::symmetric(8, 3));
     frame.show(ui, |ui| {
-        ui.label(
-            egui::RichText::new(text)
-                .size(11.0)
-                .strong()
-                .color(color),
-        );
+        ui.label(egui::RichText::new(text).size(11.0).strong().color(color));
     });
 }
 
 pub fn primary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     let button = egui::Button::new(
-        egui::RichText::new(text).strong().color(egui::Color32::WHITE),
+        egui::RichText::new(text)
+            .strong()
+            .color(egui::Color32::WHITE),
     )
     .fill(ACCENT.gamma_multiply(0.85))
     .stroke(egui::Stroke::new(1.0, ACCENT.gamma_multiply(0.6)))
@@ -372,20 +352,20 @@ pub fn secondary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
 }
 
 pub fn small_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
-    let button = egui::Button::new(
-        egui::RichText::new(text)
-            .size(11.5)
-            .color(TEXT_DIM),
-    )
-    .fill(GLASS_HOVER)
-    .stroke(egui::Stroke::new(1.0, GLASS_BORDER))
-    .corner_radius(8)
-    .min_size(egui::vec2(0.0, 24.0));
+    let button = egui::Button::new(egui::RichText::new(text).size(11.5).color(TEXT_DIM))
+        .fill(GLASS_HOVER)
+        .stroke(egui::Stroke::new(1.0, GLASS_BORDER))
+        .corner_radius(8)
+        .min_size(egui::vec2(0.0, 24.0));
     ui.add(button)
 }
 
 pub fn icon_slot(ui: &mut egui::Ui, size: egui::Vec2, content: impl FnOnce(&mut egui::Ui)) {
-    ui.allocate_ui_with_layout(size, egui::Layout::left_to_right(egui::Align::Center), content);
+    ui.allocate_ui_with_layout(
+        size,
+        egui::Layout::left_to_right(egui::Align::Center),
+        content,
+    );
 }
 
 const SEARCH_BAR_ICON_SIZE: f32 = 14.0;
@@ -400,27 +380,28 @@ fn search_bar_frame() -> egui::Frame {
 }
 
 pub fn overlay_search_bar(ui: &mut egui::Ui, query: &mut String, hint: &str) -> egui::Response {
-    let mut text_response = None;
-    search_bar_frame().show(ui, |ui| {
-        ui.horizontal(|ui| {
-            icon_slot(
-                ui,
-                egui::vec2(SEARCH_BAR_ICON_SIZE, SEARCH_BAR_ROW_HEIGHT),
-                |ui| {
-                    crate::icons::ui_icons::search_icon(ui, SEARCH_BAR_ICON_SIZE, TEXT_DIM);
-                },
-            );
-            ui.add_space(2.0);
-            text_response = Some(ui.add(
-                egui::TextEdit::singleline(query)
-                    .hint_text(hint)
-                    .desired_width(f32::INFINITY)
-                    .frame(egui::Frame::NONE)
-                    .font(egui::FontId::proportional(13.0)),
-            ));
-        });
-    });
-    text_response.expect("search bar text field")
+    search_bar_frame()
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                icon_slot(
+                    ui,
+                    egui::vec2(SEARCH_BAR_ICON_SIZE, SEARCH_BAR_ROW_HEIGHT),
+                    |ui| {
+                        crate::icons::ui_icons::search_icon(ui, SEARCH_BAR_ICON_SIZE, TEXT_DIM);
+                    },
+                );
+                ui.add_space(2.0);
+                ui.add(
+                    egui::TextEdit::singleline(query)
+                        .hint_text(hint)
+                        .desired_width(f32::INFINITY)
+                        .frame(egui::Frame::NONE)
+                        .font(egui::FontId::proportional(13.0)),
+                )
+            })
+            .inner
+        })
+        .inner
 }
 
 pub fn list_icon(ui: &mut egui::Ui, texture: &egui::TextureHandle, size: f32) {
@@ -451,11 +432,7 @@ pub fn overlay_keyboard_hint_bar(ui: &mut egui::Ui, hints: &[(&str, &str)]) {
                             .color(egui::Color32::from_rgb(240, 244, 255)),
                     );
                 });
-                ui.label(
-                    egui::RichText::new(*action)
-                        .size(8.5)
-                        .color(TEXT_MUTED),
-                );
+                ui.label(egui::RichText::new(*action).size(8.5).color(TEXT_MUTED));
             });
         }
     });
@@ -464,8 +441,8 @@ pub fn overlay_keyboard_hint_bar(ui: &mut egui::Ui, hints: &[(&str, &str)]) {
 #[cfg(test)]
 mod tests {
     use super::{
-        marks_row_outer_width, marks_switcher_content_size, overlay_viewport_size,
-        MARKS_CARD_GAP, MARKS_CARD_WIDTH, MARKS_ROW_END_SLACK,
+        marks_row_outer_width, marks_switcher_content_size, overlay_viewport_size, MARKS_CARD_GAP,
+        MARKS_CARD_WIDTH, MARKS_ROW_END_SLACK,
     };
 
     #[test]
@@ -474,9 +451,9 @@ mod tests {
         // plus DPI rounding is never clipped by the scroll area.
         for count in [1_usize, 2, 5, 9] {
             let size = marks_switcher_content_size(count);
-            let row = count as f32 * MARKS_CARD_WIDTH
-                + (count as f32 - 1.0) * MARKS_CARD_GAP
-                + MARKS_ROW_END_SLACK;
+            let count_f = crate::win_cast::usize_to_f32(count);
+            let row =
+                count_f * MARKS_CARD_WIDTH + (count_f - 1.0) * MARKS_CARD_GAP + MARKS_ROW_END_SLACK;
             let expected = row.max(220.0) + 20.0;
             assert!(
                 (size.x - expected).abs() < f32::EPSILON,
@@ -505,8 +482,7 @@ mod tests {
         let capped = marks_row_outer_width(9, 300.0);
         assert!((capped - 300.0).abs() < f32::EPSILON);
         let exact = marks_row_outer_width(2, 1200.0);
-        let expected =
-            2.0 * MARKS_CARD_WIDTH + MARKS_CARD_GAP + MARKS_ROW_END_SLACK;
+        let expected = 2.0 * MARKS_CARD_WIDTH + MARKS_CARD_GAP + MARKS_ROW_END_SLACK;
         assert!((exact - expected).abs() < f32::EPSILON);
     }
 }

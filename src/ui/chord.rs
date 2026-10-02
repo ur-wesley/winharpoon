@@ -100,7 +100,7 @@ pub fn chord_from_egui_key(key: egui::Key, modifiers: egui::Modifiers) -> Option
         return None;
     }
     Some(chord_from_vk_mods(
-        windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(vk as u16),
+        windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(u16::try_from(vk).unwrap_or(0)),
         mods_from_egui(modifiers) | 0x4000,
     ))
 }
@@ -112,7 +112,7 @@ pub fn chord_from_egui_key_win32(key: egui::Key) -> Option<String> {
     }
     let mods = util::keyboard_modifiers();
     Some(chord_from_vk_mods(
-        windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(vk as u16),
+        windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(u16::try_from(vk).unwrap_or(0)),
         mods,
     ))
 }

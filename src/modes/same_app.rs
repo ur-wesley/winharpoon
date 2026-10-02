@@ -30,18 +30,30 @@ pub fn cycle_same_app(forward: bool) -> CycleResult {
     }
 
     group.sort_by_key(|w| w.hwnd);
-    let idx = group.iter().position(|w| w.hwnd == current.hwnd).unwrap_or(0);
+    let idx = group
+        .iter()
+        .position(|w| w.hwnd == current.hwnd)
+        .unwrap_or(0);
     let next_idx = if forward {
-        (idx + 1) % group.len()
+        let next = idx.saturating_add(1);
+        if next >= group.len() {
+            0
+        } else {
+            next
+        }
     } else if idx == 0 {
-        group.len() - 1
+        group.len().saturating_sub(1)
     } else {
-        idx - 1
+        idx.saturating_sub(1)
     };
-    let next = &group[next_idx];
+    let Some(next) = group.get(next_idx) else {
+        return CycleResult::SingleWindow(current.exe_name);
+    };
     log::debug(format!(
         "cycle_same_app: {} -> {} (idx {idx} -> {next_idx} of {})",
-        current.title, next.title, group.len()
+        current.title,
+        next.title,
+        group.len()
     ));
     if !focus::focus_window(next.hwnd) {
         return CycleResult::SingleWindow(current.exe_name);
@@ -53,7 +65,9 @@ pub fn same_group(current: &WindowInfo, candidate: &WindowInfo) -> bool {
     if current.exe_path == candidate.exe_path {
         return true;
     }
-    let shared_shell = current.exe_name.eq_ignore_ascii_case("ApplicationFrameHost.exe")
+    let shared_shell = current
+        .exe_name
+        .eq_ignore_ascii_case("ApplicationFrameHost.exe")
         || current.exe_name.eq_ignore_ascii_case("SystemSettings.exe");
     if shared_shell && current.exe_name == candidate.exe_name {
         return title_prefix_match(&current.title, &candidate.title);

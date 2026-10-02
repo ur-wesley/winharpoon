@@ -4,7 +4,9 @@ use std::sync::LazyLock;
 
 use parking_lot::Mutex;
 use windows::core::PCWSTR;
-use windows::Win32::Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW};
+use windows::Win32::Storage::FileSystem::{
+    GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
+};
 
 use crate::util;
 
@@ -50,10 +52,9 @@ fn format_exe_stem(exe_path: &Path) -> String {
 
 fn title_word(word: &str) -> String {
     let mut chars = word.chars();
-    chars.next().map_or_else(
-        String::new,
-        |first| first.to_uppercase().collect::<String>() + &chars.as_str().to_lowercase(),
-    )
+    chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().collect::<String>() + &chars.as_str().to_lowercase()
+    })
 }
 
 unsafe fn version_string(exe_path: &Path, field: &str) -> Option<String> {
@@ -63,7 +64,7 @@ unsafe fn version_string(exe_path: &Path, field: &str) -> Option<String> {
     if size == 0 {
         return None;
     }
-    let mut data = vec![0u8; size as usize];
+    let mut data = vec![0u8; usize::try_from(size).unwrap_or(0)];
     GetFileVersionInfoW(
         PCWSTR(path_w.as_ptr()),
         Some(0),
@@ -87,11 +88,10 @@ unsafe fn version_string(exe_path: &Path, field: &str) -> Option<String> {
         return None;
     }
 
-    let trans = std::slice::from_raw_parts(trans_ptr.cast::<u16>(), (trans_len / 2) as usize);
-    let subblock = format!(
-        "\\StringFileInfo\\{:04x}{:04x}\\{field}",
-        trans[0], trans[1]
-    );
+    let entry_len = usize::try_from(trans_len.saturating_div(2)).unwrap_or(0);
+    let trans = std::slice::from_raw_parts(trans_ptr.cast::<u16>(), entry_len);
+    let [lang, code] = *trans.first_chunk::<2>()?;
+    let subblock = format!("\\StringFileInfo\\{lang:04x}{code:04x}\\{field}");
     let subblock_w = util::wide(&subblock);
 
     let mut value_ptr = std::ptr::null_mut();
@@ -109,7 +109,7 @@ unsafe fn version_string(exe_path: &Path, field: &str) -> Option<String> {
         return None;
     }
 
-    let wide_len = (value_len).saturating_sub(1) as usize;
+    let wide_len = usize::try_from(value_len.saturating_sub(1)).unwrap_or(0);
     let wide = std::slice::from_raw_parts(value_ptr.cast::<u16>(), wide_len);
     Some(util::from_wide(wide))
 }

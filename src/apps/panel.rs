@@ -95,15 +95,15 @@ impl AppMenuPanel {
         if let Some(id) = self.controller.capture_hotkey_id.clone() {
             match poll_chord_capture(&ctx, false) {
                 ChordCaptureResult::Cancelled => {
-                    self.controller
-                        .handle_action(AppMenuAction::CancelHotkeyCapture, favorites, state);
+                    self.controller.handle_action(
+                        AppMenuAction::CancelHotkeyCapture,
+                        favorites,
+                        state,
+                    );
                 }
                 ChordCaptureResult::Captured(chord) => {
                     self.controller.handle_action(
-                        AppMenuAction::SetFavoriteHotkey {
-                            id,
-                            chord,
-                        },
+                        AppMenuAction::SetFavoriteHotkey { id, chord },
                         favorites,
                         state,
                     );
@@ -113,7 +113,8 @@ impl AppMenuPanel {
         }
 
         if handle_escape(&ctx) && self.controller.capture_hotkey_id.is_none() {
-            self.controller.handle_action(AppMenuAction::Close, favorites, state);
+            self.controller
+                .handle_action(AppMenuAction::Close, favorites, state);
             hide_overlay_viewport(&ctx);
             return;
         }

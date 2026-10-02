@@ -32,8 +32,11 @@ pub fn scan() -> Vec<AppEntry> {
     };
 
     let mut enum_id_list: Option<IEnumIDList> = None;
-    let flags: u32 = (SHCONTF_FOLDERS.0 | SHCONTF_NONFOLDERS.0 | SHCONTF_INCLUDEHIDDEN.0) as u32;
-    if unsafe { folder.EnumObjects(HWND(std::ptr::null_mut()), flags, &mut enum_id_list) }.is_err() {
+    let flags: u32 =
+        u32::try_from(SHCONTF_FOLDERS.0 | SHCONTF_NONFOLDERS.0 | SHCONTF_INCLUDEHIDDEN.0)
+            .unwrap_or(0);
+    if unsafe { folder.EnumObjects(HWND(std::ptr::null_mut()), flags, &mut enum_id_list) }.is_err()
+    {
         log::warn("apps: EnumObjects failed");
         return out;
     }
@@ -48,12 +51,12 @@ pub fn scan() -> Vec<AppEntry> {
         if hr.is_err() || fetched == 0 {
             break;
         }
-        let pidl = pidl_arr[0];
+        let [pidl] = pidl_arr;
         if pidl.is_null() {
             break;
         }
 
-        let item: Option<IShellItem> = unsafe { SHCreateItemFromIDList(pidl as *const _) }.ok();
+        let item: Option<IShellItem> = unsafe { SHCreateItemFromIDList(pidl.cast_const()) }.ok();
         if let Some(item) = item {
             if let Some(entry) = build_entry(&item) {
                 // Same identity scheme as the merged index (entry.id).
@@ -71,7 +74,7 @@ pub fn scan() -> Vec<AppEntry> {
             }
         }
 
-        unsafe { CoTaskMemFree(Some(pidl as *const _)) };
+        unsafe { CoTaskMemFree(Some(pidl.cast_const().cast::<core::ffi::c_void>())) };
     }
 
     log::debug(format!("apps: AppsFolder yielded {} items", out.len()));
@@ -136,7 +139,7 @@ fn read_display_name(item: &IShellItem, sigdn: SIGDN) -> Option<String> {
             return None;
         }
         let owned = ptr.to_string().unwrap_or_default();
-        CoTaskMemFree(Some(ptr.0 as *const _));
+        CoTaskMemFree(Some(ptr.0.cast_const().cast::<core::ffi::c_void>()));
         if owned.is_empty() {
             None
         } else {

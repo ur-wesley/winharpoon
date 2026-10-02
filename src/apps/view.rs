@@ -75,6 +75,9 @@ pub fn render_app_menu(
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     let list_width = ui.available_width();
+                    // Same hover contract as launcher: a resting cursor must
+                    // not steal the selection back from keyboard nav.
+                    let pointer_moved = ctx.input(|i| i.pointer.delta() != egui::Vec2::ZERO);
                     ui.set_width(list_width);
                     ui.with_layout(
                         egui::Layout::top_down(egui::Align::Min).with_cross_justify(true),
@@ -92,17 +95,15 @@ pub fn render_app_menu(
                                 return;
                             }
                             for (row_i, row) in controller.rows.iter().enumerate() {
-                                let keyboard_highlight =
-                                    controller.selection.hovered.is_none() && row_i == selected_row;
+                                let keyboard_highlight = row_i == selected_row;
                                 let row_result = searchable_list_row(
                                     ui,
                                     &SearchableListRowProps {
-                                        icon: icon_cache
-                                            .file_icon(
-                                                &ctx,
-                                                icon_path(&row.entry),
-                                                LIST_ICON_SIZE as u32,
-                                            ),
+                                        icon: icon_cache.file_icon(
+                                            &ctx,
+                                            icon_path(&row.entry),
+                                            crate::win_cast::f32_to_u32(LIST_ICON_SIZE),
+                                        ),
                                         title: &row.entry.name,
                                         highlight: if keyboard_highlight {
                                             RowHighlight::Keyboard
@@ -115,7 +116,10 @@ pub fn render_app_menu(
                                         mark_slot: None,
                                     },
                                 );
-                                if row_result.highlight == RowHighlight::Hover {
+                                if row_result.highlight == RowHighlight::Hover
+                                    && pointer_moved
+                                    && row_i != selected_row
+                                {
                                     actions.push(AppMenuAction::Hover(Some(row_i)));
                                 }
                                 if row_result.response.clicked() {
@@ -134,20 +138,19 @@ pub fn render_app_menu(
     }
 
     if ctx.input(|i| {
-        i.key_pressed(egui::Key::D)
-            && i.modifiers.ctrl
-            && !i.modifiers.shift
-            && !i.modifiers.alt
+        i.key_pressed(egui::Key::D) && i.modifiers.ctrl && !i.modifiers.shift && !i.modifiers.alt
     }) && controller.capture_hotkey_id.is_none()
     {
-        let active = controller.selection.active_row();
+        // Enter and favorites act on the unified selection: hover has
+        // already moved `selected`, so mouse and keyboard agree.
+        let active = controller.selection.selected;
         if let Some(row) = controller.rows.get(active) {
             actions.push(AppMenuAction::ToggleFavorite(row.entry.id.clone()));
         }
     }
 
     if ctx.input(|i| i.key_pressed(egui::Key::Enter)) && controller.capture_hotkey_id.is_none() {
-        let active = controller.selection.active_row();
+        let active = controller.selection.selected;
         if controller.rows.get(active).is_some() {
             ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
             actions.push(AppMenuAction::Launch(active));

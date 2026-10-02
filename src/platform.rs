@@ -17,14 +17,14 @@ fn hwnd_from_frame(frame: &eframe::Frame) -> Option<windows::Win32::Foundation::
     let RawWindowHandle::Win32(win) = handle.as_raw() else {
         return None;
     };
-    Some(HWND(win.hwnd.get() as *mut core::ffi::c_void))
+    Some(HWND(crate::win_cast::raw_to_mut_c_void(win.hwnd.get())))
 }
 
 #[cfg(windows)]
 fn hwnd_from_title(title: &str) -> Option<windows::Win32::Foundation::HWND> {
+    use windows::core::PCWSTR;
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
-    use windows::core::PCWSTR;
 
     let wide: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
     let hwnd = unsafe { FindWindowW(None, PCWSTR(wide.as_ptr())) }.ok()?;
@@ -48,8 +48,8 @@ fn resolve_main_hwnd(frame: Option<&eframe::Frame>) -> Option<windows::Win32::Fo
 #[cfg(windows)]
 fn maintain_borderless_overlay(hwnd: windows::Win32::Foundation::HWND) {
     use windows::Win32::Graphics::Dwm::{
-        DwmSetWindowAttribute, DWMWA_NCRENDERING_POLICY, DWMWA_VISIBLE_FRAME_BORDER_THICKNESS,
-        DWMNCRP_USEWINDOWSTYLE,
+        DwmSetWindowAttribute, DWMNCRP_USEWINDOWSTYLE, DWMWA_NCRENDERING_POLICY,
+        DWMWA_VISIBLE_FRAME_BORDER_THICKNESS,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_STYLE, SWP_FRAMECHANGED,
@@ -62,8 +62,8 @@ fn maintain_borderless_overlay(hwnd: windows::Win32::Foundation::HWND) {
         let _ = DwmSetWindowAttribute(
             hwnd,
             DWMWA_NCRENDERING_POLICY,
-            &nc_policy as *const i32 as *const _,
-            std::mem::size_of::<i32>() as u32,
+            std::ptr::addr_of!(nc_policy).cast::<core::ffi::c_void>(),
+            crate::win_cast::size_of_u32::<i32>(),
         );
     }
 
@@ -72,16 +72,16 @@ fn maintain_borderless_overlay(hwnd: windows::Win32::Foundation::HWND) {
         let _ = DwmSetWindowAttribute(
             hwnd,
             DWMWA_VISIBLE_FRAME_BORDER_THICKNESS,
-            &border_thickness as *const i32 as *const _,
-            std::mem::size_of::<i32>() as u32,
+            std::ptr::addr_of!(border_thickness).cast::<core::ffi::c_void>(),
+            crate::win_cast::size_of_u32::<i32>(),
         );
     }
 
     unsafe {
-        let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
+        let style = crate::win_cast::long_ptr_to_u32(GetWindowLongPtrW(hwnd, GWL_STYLE));
         let stripped = style & !(WS_CAPTION.0 | WS_THICKFRAME.0 | WS_SYSMENU.0);
         if stripped != style {
-            SetWindowLongPtrW(hwnd, GWL_STYLE, stripped as _);
+            SetWindowLongPtrW(hwnd, GWL_STYLE, crate::win_cast::u32_to_long_ptr(stripped));
             let _ = SetWindowPos(
                 hwnd,
                 None,
@@ -98,9 +98,9 @@ fn maintain_borderless_overlay(hwnd: windows::Win32::Foundation::HWND) {
 #[cfg(windows)]
 fn apply_dwm_glass_to_hwnd(hwnd: windows::Win32::Foundation::HWND, backdrop: GlassBackdrop) {
     use windows::Win32::Graphics::Dwm::{
-        DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMWA_SYSTEMBACKDROP_TYPE,
-        DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMSBT_MAINWINDOW,
-        DWMSBT_NONE, DWMSBT_TRANSIENTWINDOW, DWMWCP_ROUND,
+        DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMSBT_MAINWINDOW, DWMSBT_NONE,
+        DWMSBT_TRANSIENTWINDOW, DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_IMMERSIVE_DARK_MODE,
+        DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
     };
     use windows::Win32::UI::Controls::MARGINS;
 
@@ -119,8 +119,8 @@ fn apply_dwm_glass_to_hwnd(hwnd: windows::Win32::Foundation::HWND, backdrop: Gla
         let _ = DwmSetWindowAttribute(
             hwnd,
             DWMWA_USE_IMMERSIVE_DARK_MODE,
-            &dark_mode as *const i32 as *const _,
-            std::mem::size_of::<i32>() as u32,
+            std::ptr::addr_of!(dark_mode).cast::<core::ffi::c_void>(),
+            crate::win_cast::size_of_u32::<i32>(),
         );
     }
 
@@ -134,8 +134,8 @@ fn apply_dwm_glass_to_hwnd(hwnd: windows::Win32::Foundation::HWND, backdrop: Gla
         let _ = DwmSetWindowAttribute(
             hwnd,
             DWMWA_SYSTEMBACKDROP_TYPE,
-            &backdrop_value as *const i32 as *const _,
-            std::mem::size_of::<i32>() as u32,
+            std::ptr::addr_of!(backdrop_value).cast::<core::ffi::c_void>(),
+            crate::win_cast::size_of_u32::<i32>(),
         );
     }
 
@@ -145,8 +145,8 @@ fn apply_dwm_glass_to_hwnd(hwnd: windows::Win32::Foundation::HWND, backdrop: Gla
             let _ = DwmSetWindowAttribute(
                 hwnd,
                 DWMWA_WINDOW_CORNER_PREFERENCE,
-                &corner as *const i32 as *const _,
-                std::mem::size_of::<i32>() as u32,
+                std::ptr::addr_of!(corner).cast::<core::ffi::c_void>(),
+                crate::win_cast::size_of_u32::<i32>(),
             );
         }
     }
@@ -202,7 +202,7 @@ pub fn monitor_work_area_at_physical_point(
     use eframe::egui;
     use windows::Win32::Foundation::POINT;
     use windows::Win32::Graphics::Gdi::{
-        GetMonitorInfoW, MonitorFromPoint, MONITOR_DEFAULTTONEAREST, MONITORINFO,
+        GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
     };
 
     let ppp = ctx
@@ -210,19 +210,25 @@ pub fn monitor_work_area_at_physical_point(
         .unwrap_or(1.0);
 
     let pt = POINT {
-        x: physical_x as i32,
-        y: physical_y as i32,
+        x: crate::win_cast::f64_to_i32(physical_x),
+        y: crate::win_cast::f64_to_i32(physical_y),
     };
     let monitor = unsafe { MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST) };
     let mut info = MONITORINFO {
-        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        cbSize: crate::win_cast::size_of_u32::<MONITORINFO>(),
         ..Default::default()
     };
     if unsafe { GetMonitorInfoW(monitor, &mut info).as_bool() } {
         let rect = info.rcWork;
         egui::Rect::from_min_max(
-            egui::pos2(rect.left as f32 / ppp, rect.top as f32 / ppp),
-            egui::pos2(rect.right as f32 / ppp, rect.bottom as f32 / ppp),
+            egui::pos2(
+                crate::win_cast::px_to_f32(rect.left) / ppp,
+                crate::win_cast::px_to_f32(rect.top) / ppp,
+            ),
+            egui::pos2(
+                crate::win_cast::px_to_f32(rect.right) / ppp,
+                crate::win_cast::px_to_f32(rect.bottom) / ppp,
+            ),
         )
     } else {
         ctx.input(|i| {
@@ -240,6 +246,30 @@ pub fn monitor_work_area_at_physical_point(
     _physical_x: f64,
     _physical_y: f64,
 ) -> eframe::egui::Rect {
+    fallback_monitor_rect(ctx)
+}
+
+#[cfg(windows)]
+pub fn active_monitor_work_area(ctx: &eframe::egui::Context) -> eframe::egui::Rect {
+    // Focus-first placement: center popups on the monitor with the current
+    // focus, not always the main monitor.
+    // Priority: foreground window center -> cursor -> fallback.
+    if let Some((x, y)) = foreground_center_physical() {
+        return monitor_work_area_at_physical_point(ctx, f64::from(x), f64::from(y));
+    }
+    if let Some((x, y)) = cursor_physical_pos() {
+        return monitor_work_area_at_physical_point(ctx, f64::from(x), f64::from(y));
+    }
+    fallback_monitor_rect(ctx)
+}
+
+#[cfg(not(windows))]
+pub fn active_monitor_work_area(ctx: &eframe::egui::Context) -> eframe::egui::Rect {
+    fallback_monitor_rect(ctx)
+}
+
+#[cfg(not(windows))]
+fn fallback_monitor_rect(ctx: &eframe::egui::Context) -> eframe::egui::Rect {
     use eframe::egui;
     ctx.input(|i| {
         i.viewport().monitor_size.map_or_else(
@@ -249,4 +279,107 @@ pub fn monitor_work_area_at_physical_point(
     })
 }
 
+#[cfg(windows)]
+fn fallback_monitor_rect(ctx: &eframe::egui::Context) -> eframe::egui::Rect {
+    use eframe::egui;
+    ctx.input(|i| {
+        i.viewport().monitor_size.map_or_else(
+            || ctx.content_rect(),
+            |size| egui::Rect::from_min_size(egui::Pos2::ZERO, size),
+        )
+    })
+}
 
+#[cfg(windows)]
+fn cursor_physical_pos() -> Option<(i32, i32)> {
+    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+    let mut pt = windows::Win32::Foundation::POINT::default();
+    unsafe { GetCursorPos(&mut pt).ok()? };
+    Some((pt.x, pt.y))
+}
+
+#[cfg(windows)]
+fn foreground_center_physical() -> Option<(i32, i32)> {
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowRect};
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.0.is_null() {
+            return None;
+        }
+        let mut rect = windows::Win32::Foundation::RECT::default();
+        if GetWindowRect(hwnd, &mut rect).is_err() {
+            return None;
+        }
+        // Ignore our own hidden overlay parked off-screen.
+        if rect.left <= -10_000 && rect.top <= -10_000 {
+            return None;
+        }
+        if rect.right <= rect.left || rect.bottom <= rect.top {
+            return None;
+        }
+        Some((
+            i32::midpoint(rect.left, rect.right),
+            i32::midpoint(rect.top, rect.bottom),
+        ))
+    }
+}
+
+/// Center `size` in `work_area`, clamped inside with a small margin so the
+/// popup never hangs off-screen. Pure math — unit tested.
+pub fn center_in_work_area(
+    work_area: eframe::egui::Rect,
+    size: eframe::egui::Vec2,
+) -> eframe::egui::Pos2 {
+    use eframe::egui;
+    const MARGIN: f32 = 8.0;
+    let mut pos = egui::pos2(
+        work_area.center().x - size.x / 2.0,
+        work_area.center().y - size.y / 2.0,
+    );
+    // If the popup is larger than the work area, pin to the top-left margin.
+    if size.x + MARGIN * 2.0 >= work_area.width() {
+        pos.x = work_area.min.x + MARGIN;
+    } else {
+        pos.x = pos
+            .x
+            .clamp(work_area.min.x + MARGIN, work_area.max.x - size.x - MARGIN);
+    }
+    if size.y + MARGIN * 2.0 >= work_area.height() {
+        pos.y = work_area.min.y + MARGIN;
+    } else {
+        pos.y = pos
+            .y
+            .clamp(work_area.min.y + MARGIN, work_area.max.y - size.y - MARGIN);
+    }
+    pos
+}
+
+#[cfg(test)]
+mod tests {
+    use super::center_in_work_area;
+
+    #[test]
+    fn centers_popup_in_secondary_monitor_work_area() {
+        // Secondary monitor at x=[1920,3840]: popup must center there,
+        // not on the main monitor at x=0.
+        let work_area = eframe::egui::Rect::from_min_max(
+            eframe::egui::pos2(1920.0, 0.0),
+            eframe::egui::pos2(3840.0, 1080.0),
+        );
+        let pos = center_in_work_area(work_area, eframe::egui::vec2(480.0, 420.0));
+        assert!((pos.x - (1920.0 + (1920.0 - 480.0) / 2.0)).abs() < 0.01);
+        assert!((pos.y - ((1080.0 - 420.0) / 2.0)).abs() < 0.01);
+        assert!(pos.x >= 1920.0);
+    }
+
+    #[test]
+    fn oversized_popup_pins_to_work_area_margin() {
+        let work_area = eframe::egui::Rect::from_min_max(
+            eframe::egui::pos2(1920.0, 0.0),
+            eframe::egui::pos2(2560.0, 1080.0),
+        );
+        let pos = center_in_work_area(work_area, eframe::egui::vec2(2000.0, 1200.0));
+        assert!((pos.x - 1928.0).abs() < 0.01);
+        assert!((pos.y - 8.0).abs() < 0.01);
+    }
+}

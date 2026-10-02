@@ -5,7 +5,9 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, PostMessageW, PostQuitMessage,
     RegisterClassW, TranslateMessage, WINDOW_EX_STYLE, WM_DESTROY, WM_HOTKEY, WM_TIMER, WNDCLASSW,
@@ -94,9 +96,12 @@ unsafe impl Sync for HotkeyManager {}
 
 impl HotkeyManager {
     pub fn register(state: &Arc<Mutex<AppState>>, bindings: &[HotkeyBinding]) -> Self {
-        log::debug(format!("HotkeyManager::register with {} bindings", bindings.len()));
+        log::debug(format!(
+            "HotkeyManager::register with {} bindings",
+            bindings.len()
+        ));
         let hwnd = unsafe { create_message_window() };
-        HOTKEY_HWND.store(hwnd.0 as isize, Ordering::SeqCst);
+        HOTKEY_HWND.store(crate::win_cast::hwnd_to_raw(hwnd), Ordering::SeqCst);
         log::debug(format!("hotkey hwnd: {:?}", hwnd.0));
         let mut manager = Self {
             hwnd,
@@ -115,7 +120,10 @@ impl HotkeyManager {
     }
 
     pub fn reload(&mut self, state: &Arc<Mutex<AppState>>, bindings: &[HotkeyBinding]) {
-        log::debug(format!("HotkeyManager::reload with {} bindings", bindings.len()));
+        log::debug(format!(
+            "HotkeyManager::reload with {} bindings",
+            bindings.len()
+        ));
         self.unregister_all();
         self.apply_bindings(bindings);
         let conflict_count = self.conflict_count();
@@ -158,13 +166,13 @@ impl HotkeyManager {
                 continue;
             };
             let id = next_id;
-            next_id += 1;
+            next_id = next_id.saturating_add(1);
             let ok = unsafe {
                 RegisterHotKey(
                     Some(self.hwnd),
                     id,
                     HOT_KEY_MODIFIERS(parsed.modifiers),
-                    parsed.vk as u32,
+                    u32::from(parsed.vk),
                 )
                 .is_ok()
             };
@@ -236,7 +244,7 @@ impl HotkeyManager {
             let mut msg = std::mem::zeroed();
             while GetMessageW(&mut msg, None, 0, 0).as_bool() {
                 if msg.message == WM_HOTKEY {
-                    let id = msg.wParam.0 as i32;
+                    let id = i32::try_from(msg.wParam.0).unwrap_or(0);
                     if let Some(action) = self.id_map.get(&id).copied() {
                         log::debug(format!("WM_HOTKEY id={id} action={action:?}"));
                         on_action(action, state);
@@ -259,13 +267,11 @@ impl HotkeyManager {
 }
 
 pub fn post_reload() {
-    let hwnd = HOTKEY_HWND.load(Ordering::SeqCst);
-    log::debug(format!("post_reload hwnd={hwnd}"));
-    if hwnd != 0 {
-        unsafe {
-            let _ = PostMessageW(Some(HWND(hwnd as *mut _)), wm_reload(), WPARAM(0), LPARAM(0));
-        }
-    }
+    log::debug(format!(
+        "post_reload hwnd={}",
+        HOTKEY_HWND.load(Ordering::SeqCst)
+    ));
+    let _ = post_hotkey_message(wm_reload(), WPARAM(0), LPARAM(0));
 }
 
 pub fn hotkey_hwnd() -> Option<HWND> {
@@ -273,21 +279,39 @@ pub fn hotkey_hwnd() -> Option<HWND> {
     if hwnd == 0 {
         None
     } else {
-        Some(HWND(hwnd as *mut _))
+        Some(crate::win_cast::raw_to_hwnd(hwnd))
     }
 }
 
 pub fn post_quit() {
     let hwnd = HOTKEY_HWND.load(Ordering::SeqCst);
     log::debug(format!("post_quit hwnd={hwnd}"));
-    if hwnd != 0 {
-        unsafe {
-            let _ = PostMessageW(Some(HWND(hwnd as *mut _)), wm_quit_app(), WPARAM(0), LPARAM(0));
-        }
-    } else {
+    if post_hotkey_message(wm_quit_app(), WPARAM(0), LPARAM(0)) {
+        return;
+    }
+    if hwnd == 0 {
         unsafe {
             PostQuitMessage(0);
         }
+    }
+}
+
+/// Post a message to the hotkey window. Shared by the low-level hooks so the
+/// hwnd lookup lives in exactly one place. Returns false when there is no
+/// window yet (startup) or the post failed.
+pub fn post_hotkey_message(msg: u32, wparam: WPARAM, lparam: LPARAM) -> bool {
+    let hwnd = HOTKEY_HWND.load(Ordering::SeqCst);
+    if hwnd == 0 {
+        return false;
+    }
+    unsafe {
+        PostMessageW(
+            Some(crate::win_cast::raw_to_hwnd(hwnd)),
+            msg,
+            wparam,
+            lparam,
+        )
+        .is_ok()
     }
 }
 
@@ -301,12 +325,20 @@ impl Drop for HotkeyManager {
 pub fn report_config_errors(errors: &[ConfigValidationError]) {
     for err in errors {
         match err {
-            ConfigValidationError::DuplicateBinding { chord, first, second } => {
+            ConfigValidationError::DuplicateBinding {
+                chord,
+                first,
+                second,
+            } => {
                 let msg = format!("duplicate binding {chord} for {first} and {second}");
                 log::warn(&msg);
                 log::notify("WinHarpoon config error", &msg);
             }
-            ConfigValidationError::InvalidChord { label, chord, reason } => {
+            ConfigValidationError::InvalidChord {
+                label,
+                chord,
+                reason,
+            } => {
                 let msg = format!("invalid chord {chord} for {label}: {reason}");
                 log::warn(&msg);
                 log::notify("WinHarpoon config error", &msg);
@@ -317,7 +349,10 @@ pub fn report_config_errors(errors: &[ConfigValidationError]) {
 
 unsafe fn create_message_window() -> HWND {
     let class_name = super::util::wide(CLASS_NAME);
-    let hinstance = GetModuleHandleW(None).unwrap();
+    let Ok(hinstance) = GetModuleHandleW(None) else {
+        log::error("hotkey window: no module handle");
+        return HWND(std::ptr::null_mut());
+    };
 
     let wc = WNDCLASSW {
         lpfnWndProc: Some(window_proc),
@@ -341,7 +376,7 @@ unsafe fn create_message_window() -> HWND {
         Some(hinstance.into()),
         None,
     )
-    .expect("create hotkey window")
+    .unwrap_or(HWND(std::ptr::null_mut()))
 }
 
 unsafe extern "system" fn window_proc(
@@ -361,13 +396,13 @@ unsafe extern "system" fn window_proc(
     }
     // Registered messages: exact-id match, no WM_USER overlap with other apps.
     if msg == wm_marks_key() {
-        let vk = wparam.0 as u32;
+        let vk = u32::try_from(wparam.0).unwrap_or(0);
         let key_up = lparam.0 != 0;
         crate::marks_switcher::hook::dispatch_key(vk, key_up);
         return LRESULT(0);
     }
     if msg == wm_jump_key() {
-        let slot = wparam.0 as u8;
+        let slot = u8::try_from(wparam.0).unwrap_or(0);
         crate::marks_switcher::hook::dispatch_jump(slot);
         return LRESULT(0);
     }
@@ -376,8 +411,8 @@ unsafe extern "system" fn window_proc(
         return LRESULT(0);
     }
     if msg == wm_app_menu() {
-        let x = wparam.0 as i32;
-        let y = lparam.0 as i32;
+        let x = crate::win_cast::usize_bits_to_i32(wparam.0);
+        let y = crate::win_cast::isize_bits_to_i32(lparam.0);
         crate::apps::hook::dispatch_app_menu(x, y);
         return LRESULT(0);
     }

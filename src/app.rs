@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
+use crate::apps::{self, SharedFavorites};
 use crate::config::Config;
-use crate::hotkeys::{post_reload, HotkeyManager, HotkeyRegistrationResult, HotkeyAction};
+use crate::hotkeys::{post_reload, HotkeyAction, HotkeyManager, HotkeyRegistrationResult};
 use crate::launcher;
 use crate::log;
-use crate::apps::{self, SharedFavorites};
-use crate::modes::marks::{ToggleMarkResult, SharedMarks};
+use crate::modes::marks::{SharedMarks, ToggleMarkResult};
 use crate::modes::same_app;
 
 pub struct AppState {
@@ -89,25 +89,16 @@ pub fn dispatch_action(action: HotkeyAction, state: &Arc<Mutex<AppState>>) {
             let mut marks = state_guard.marks.lock();
             match marks.store.toggle_mark() {
                 ToggleMarkResult::Marked { slot, app } => {
-                    log::notify(
-                        "WinHarpoon",
-                        &format!("{app} — marked slot {slot}"),
-                    );
+                    log::notify("WinHarpoon", &format!("{app} — marked slot {slot}"));
                 }
                 ToggleMarkResult::Unmarked { slot, app } => {
-                    log::notify(
-                        "WinHarpoon",
-                        &format!("{app} — unmarked slot {slot}"),
-                    );
+                    log::notify("WinHarpoon", &format!("{app} — unmarked slot {slot}"));
                 }
                 ToggleMarkResult::NoForeground => {
                     log::notify("WinHarpoon", "No window to mark");
                 }
                 ToggleMarkResult::AllSlotsFull { app } => {
-                    log::notify(
-                        "WinHarpoon",
-                        &format!("{app} — all 9 mark slots are full"),
-                    );
+                    log::notify("WinHarpoon", &format!("{app} — all 9 mark slots are full"));
                 }
             }
         }

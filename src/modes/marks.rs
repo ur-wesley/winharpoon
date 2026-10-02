@@ -44,11 +44,9 @@ pub fn index_after_foreground(entries: &[MarkEntry]) -> usize {
     }
     let fg = get_foreground_window();
     let current_idx = fg.and_then(|fg_win| {
-        entries.iter().position(|e| {
-            e.window
-                .as_ref()
-                .is_some_and(|w| w.hwnd == fg_win.hwnd)
-        })
+        entries
+            .iter()
+            .position(|e| e.window.as_ref().is_some_and(|w| w.hwnd == fg_win.hwnd))
     });
     current_idx.unwrap_or_default()
 }
@@ -93,8 +91,12 @@ impl MarksStore {
         {
             paths::ensure_app_data();
             let path = paths::marks_path();
-            log::debug(format!("MarksStore::save to {} ({} slots)", path.display(), self.slots.len()));
-            let text = toml::to_string_pretty(self).expect("serialize marks");
+            log::debug(format!(
+                "MarksStore::save to {} ({} slots)",
+                path.display(),
+                self.slots.len()
+            ));
+            let text = toml::to_string_pretty(self).map_err(std::io::Error::other)?;
             paths::atomic_write(&path, &text)
         }
     }
@@ -118,7 +120,10 @@ impl MarksStore {
         };
         let windows = enumerate_windows(None);
         let Some(target) = resolve_identity(identity, &windows) else {
-            log::warn(format!("jump_slot {slot}: window not found for {}", identity.display_label()));
+            log::warn(format!(
+                "jump_slot {slot}: window not found for {}",
+                identity.display_label()
+            ));
             return false;
         };
         let ok = focus::focus_window(target.hwnd);
@@ -184,11 +189,17 @@ impl MarksStore {
             if pos == 0 {
                 return false;
             }
-            filled[pos - 1]
-        } else if pos + 1 >= filled.len() {
+            let Some(&prev) = filled.get(pos.saturating_sub(1)) else {
+                return false;
+            };
+            prev
+        } else if pos.saturating_add(1) >= filled.len() {
             return false;
         } else {
-            filled[pos + 1]
+            let Some(&next) = filled.get(pos.saturating_add(1)) else {
+                return false;
+            };
+            next
         };
         self.swap_slots(slot, swap_with);
         true
@@ -251,7 +262,10 @@ impl MarksState {
         }
 
         if let Some(fg) = get_foreground_window() {
-            if let Some(fg_entry) = entries.iter().find(|e| e.window.as_ref().is_some_and(|w| w.hwnd == fg.hwnd)) {
+            if let Some(fg_entry) = entries
+                .iter()
+                .find(|e| e.window.as_ref().is_some_and(|w| w.hwnd == fg.hwnd))
+            {
                 self.touch_slot(fg_entry.slot);
             }
         }
@@ -261,7 +275,8 @@ impl MarksState {
                 self.mru_slots.push(entry.slot);
             }
         }
-        self.mru_slots.retain(|s| entries.iter().any(|e| e.slot == *s));
+        self.mru_slots
+            .retain(|s| entries.iter().any(|e| e.slot == *s));
 
         entries
     }
@@ -272,7 +287,7 @@ impl MarksState {
         }
 
         let target_slot = if self.mru_slots.len() > 1 {
-            Some(self.mru_slots[1])
+            self.mru_slots.get(1).copied()
         } else {
             None
         };
@@ -284,8 +299,12 @@ impl MarksState {
         }
 
         if let Some(fg) = get_foreground_window() {
-            if let Some(fg_idx) = entries.iter().position(|e| e.window.as_ref().is_some_and(|w| w.hwnd == fg.hwnd)) {
-                return (fg_idx + 1) % entries.len();
+            if let Some(fg_idx) = entries
+                .iter()
+                .position(|e| e.window.as_ref().is_some_and(|w| w.hwnd == fg.hwnd))
+            {
+                let next = fg_idx.saturating_add(1);
+                return if next >= entries.len() { 0 } else { next };
             }
         }
 
@@ -302,14 +321,20 @@ impl MarksState {
             return false;
         }
         if forward {
-            self.cycle_index = (self.cycle_index + 1) % filled.len();
+            let next = self.cycle_index.saturating_add(1);
+            self.cycle_index = if next >= filled.len() { 0 } else { next };
         } else if self.cycle_index == 0 {
-            self.cycle_index = filled.len() - 1;
+            self.cycle_index = filled.len().saturating_sub(1);
         } else {
-            self.cycle_index -= 1;
+            self.cycle_index = self.cycle_index.saturating_sub(1);
         }
-        let slot = filled[self.cycle_index];
-        log::debug(format!("cycle_mark: slot {slot} (index {})", self.cycle_index));
+        let Some(&slot) = filled.get(self.cycle_index) else {
+            return false;
+        };
+        log::debug(format!(
+            "cycle_mark: slot {slot} (index {})",
+            self.cycle_index
+        ));
         self.store.jump_slot(slot)
     }
 }
@@ -388,9 +413,7 @@ mod tests {
             },
         );
         let live = WindowIdentity {
-            exe: PathBuf::from(
-                r"C:\Arbeit\project-vault\src-tauri\target\debug\project-vault.exe",
-            ),
+            exe: PathBuf::from(r"C:\Arbeit\project-vault\src-tauri\target\debug\project-vault.exe"),
             title: "project-vault - Project Vault".into(),
         };
         assert_eq!(store.find_slot(&live), Some(1));

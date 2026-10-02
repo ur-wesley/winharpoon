@@ -21,9 +21,12 @@ pub fn render_marks_switcher(
     // Full row width (uncapped) drives the scrollable inner content; the outer
     // panel width is capped so it never exceeds the viewport and clips the border.
     let row_width = native_ui::marks_row_width(entries.len());
-    let max_content_width = ctx
-        .input(|i| i.viewport().monitor_size.map(|s| s.x * 0.9))
-        .unwrap_or(1200.0);
+    let active_width = crate::platform::active_monitor_work_area(ctx).width();
+    let max_content_width = if active_width > 1.0 {
+        active_width * 0.9
+    } else {
+        1200.0
+    };
     let cards_width = native_ui::marks_row_outer_width(entries.len(), max_content_width);
 
     let ((), panel_rect) = native_ui::render_overlay_shell(ui, |ui| {
@@ -50,16 +53,12 @@ pub fn render_marks_switcher(
                 }
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = native_ui::MARKS_CARD_GAP;
-                    let card_size = egui::vec2(
-                        native_ui::MARKS_CARD_WIDTH,
-                        native_ui::MARKS_CARD_HEIGHT,
-                    );
+                    let card_size =
+                        egui::vec2(native_ui::MARKS_CARD_WIDTH, native_ui::MARKS_CARD_HEIGHT);
                     for (idx, entry) in entries.iter().enumerate() {
                         let is_selected = idx == selected;
-                        let (card_rect, card_response) = ui.allocate_exact_size(
-                            card_size,
-                            egui::Sense::hover(),
-                        );
+                        let (card_rect, card_response) =
+                            ui.allocate_exact_size(card_size, egui::Sense::hover());
                         ui.scope_builder(egui::UiBuilder::new().max_rect(card_rect), |ui| {
                             ui.set_width(card_size.x);
                             ui.set_min_width(card_size.x);
@@ -76,25 +75,17 @@ pub fn render_marks_switcher(
                                             native_ui::ACCENT,
                                         );
                                         ui.add_space(6.0);
-                                        native_ui::icon_slot(
-                                            ui,
-                                            egui::vec2(24.0, 24.0),
-                                            |ui| {
-                                                let exe_path = entry.window.as_ref()
-                                                    .map_or(&entry.identity.exe, |w| &w.exe_path);
-                                                if let Some(texture) =
-                                                    icon_cache.file_icon(
-                                                        ctx,
-                                                        exe_path,
-                                                        24,
-                                                    )
-                                                {
-                                                    native_ui::list_icon(
-                                                        ui, texture, 24.0,
-                                                    );
-                                                }
-                                            },
-                                        );
+                                        native_ui::icon_slot(ui, egui::vec2(24.0, 24.0), |ui| {
+                                            let exe_path = entry
+                                                .window
+                                                .as_ref()
+                                                .map_or(&entry.identity.exe, |w| &w.exe_path);
+                                            if let Some(texture) =
+                                                icon_cache.file_icon(ctx, exe_path, 24)
+                                            {
+                                                native_ui::list_icon(ui, texture, 24.0);
+                                            }
+                                        });
                                     });
                                     ui.add_space(4.0);
                                     let process_name = entry.window.as_ref().map_or_else(
@@ -111,9 +102,7 @@ pub fn render_marks_switcher(
                                             egui::RichText::new(&process_name)
                                                 .size(11.0)
                                                 .strong()
-                                                .color(primary_list_text_color(
-                                                    is_selected,
-                                                )),
+                                                .color(primary_list_text_color(is_selected)),
                                         )
                                         .truncate()
                                         .wrap_mode(egui::TextWrapMode::Truncate),
@@ -133,10 +122,7 @@ pub fn render_marks_switcher(
                             });
                         });
                         if is_selected && row_width > cards_width {
-                            ui.scroll_to_rect(
-                                card_response.rect,
-                                Some(egui::Align::Center),
-                            );
+                            ui.scroll_to_rect(card_response.rect, Some(egui::Align::Center));
                         }
                     }
                 });

@@ -21,8 +21,8 @@ use crate::config::Config;
 use crate::log;
 use crate::paths;
 
-pub use favorites::{shared_favorites, AppIndexRef, SharedFavorites};
 pub use controller::AppMenuAnchor;
+pub use favorites::{shared_favorites, AppIndexRef, SharedFavorites};
 
 use cache::load_or_scan;
 use enumerate::scan_all;
@@ -70,7 +70,10 @@ pub fn init() {
         let entries = load_or_scan();
         shared_favorites().lock().remap_to(&entries);
         let scanned_at = now_secs();
-        *INDEX.write() = Some(AppIndex { entries, scanned_at });
+        *INDEX.write() = Some(AppIndex {
+            entries,
+            scanned_at,
+        });
         log::debug("apps: index ready");
         unsafe {
             CoUninitialize();
@@ -79,7 +82,11 @@ pub fn init() {
 }
 
 pub fn entries() -> Vec<AppEntry> {
-    INDEX.read().as_ref().map(|i| i.entries.clone()).unwrap_or_default()
+    INDEX
+        .read()
+        .as_ref()
+        .map(|i| i.entries.clone())
+        .unwrap_or_default()
 }
 
 pub fn is_ready() -> bool {
@@ -98,7 +105,10 @@ pub fn refresh_async() {
         shared_favorites().lock().remap_to(&entries);
         cache::save_cache(&paths::apps_cache_path(), &entries);
         let scanned_at = now_secs();
-        *INDEX.write() = Some(AppIndex { entries, scanned_at });
+        *INDEX.write() = Some(AppIndex {
+            entries,
+            scanned_at,
+        });
         LAST_REFRESH_CHECK.store(scanned_at, Ordering::Relaxed);
         REFRESHING.store(false, Ordering::Release);
         log::debug("apps: index refreshed");

@@ -1,2 +1,7 @@
 cognitive-complexity-threshold = 25
 too-many-arguments-threshold = 7
+# Strict lints allow fast prototyping in tests (per namtao guides).
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true

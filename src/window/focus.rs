@@ -6,8 +6,8 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     BringWindowToTop, EnumWindows, GetForegroundWindow, GetWindowThreadProcessId, IsIconic,
-    IsWindow, IsWindowVisible, SetForegroundWindow, SetWindowPos, ShowWindow, HWND_TOP, SW_RESTORE,
-    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    IsWindow, IsWindowVisible, SetForegroundWindow, SetWindowPos, ShowWindow, HWND_TOP,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_RESTORE,
 };
 
 use crate::log;
@@ -27,7 +27,7 @@ pub fn capture_stack_snapshot() -> StackSnapshot {
     unsafe {
         let _ = EnumWindows(
             Some(enum_visible_hwnd),
-            LPARAM(&mut z_order as *mut _ as isize),
+            crate::win_cast::ptr_to_lparam(&raw mut z_order),
         );
     }
     let foreground = unsafe {
@@ -35,14 +35,14 @@ pub fn capture_stack_snapshot() -> StackSnapshot {
         if fg.0.is_null() {
             None
         } else {
-            Some(fg.0 as isize)
+            Some(crate::win_cast::hwnd_to_raw(fg))
         }
     };
     let minimized = z_order
         .iter()
         .copied()
         .filter(|&hwnd_raw| {
-            let hwnd = HWND(hwnd_raw as *mut _);
+            let hwnd = crate::win_cast::raw_to_hwnd(hwnd_raw);
             unsafe { IsIconic(hwnd).as_bool() }
         })
         .collect();
@@ -59,7 +59,7 @@ pub fn restore_stack_snapshot(snapshot: &StackSnapshot) {
     unsafe {
         use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_MINIMIZE};
         for &hwnd_raw in &snapshot.minimized {
-            let hwnd = HWND(hwnd_raw as *mut _);
+            let hwnd = crate::win_cast::raw_to_hwnd(hwnd_raw);
             if hwnd.0.is_null() || !IsWindow(Some(hwnd)).as_bool() {
                 continue;
             }
@@ -72,7 +72,7 @@ pub fn restore_stack_snapshot(snapshot: &StackSnapshot) {
 }
 
 pub fn preview_window(hwnd_raw: isize) {
-    let hwnd = HWND(hwnd_raw as *mut _);
+    let hwnd = crate::win_cast::raw_to_hwnd(hwnd_raw);
     if hwnd.0.is_null() {
         return;
     }
@@ -99,7 +99,7 @@ pub fn focus_window(hwnd_raw: isize) -> bool {
 fn restore_z_order(z_order: &[isize]) {
     unsafe {
         for &hwnd_raw in z_order.iter().rev() {
-            let hwnd = HWND(hwnd_raw as *mut _);
+            let hwnd = crate::win_cast::raw_to_hwnd(hwnd_raw);
             if hwnd.0.is_null() || !IsWindowVisible(hwnd).as_bool() {
                 continue;
             }
@@ -120,30 +120,22 @@ unsafe extern "system" fn enum_visible_hwnd(hwnd: HWND, lparam: LPARAM) -> BOOL 
     if hwnd.0.is_null() || !IsWindowVisible(hwnd).as_bool() {
         return BOOL(1);
     }
-    let list = &mut *(lparam.0 as *mut Vec<isize>);
-    list.push(hwnd.0 as isize);
+    let list = &mut *crate::win_cast::lparam_to_mut_ptr::<Vec<isize>>(lparam);
+    list.push(crate::win_cast::hwnd_to_raw(hwnd));
     BOOL(1)
 }
 
 fn alt_physically_held() -> bool {
-    use windows::Win32::UI::Input::KeyboardAndMouse::{
-        GetAsyncKeyState, VK_LMENU, VK_MENU, VK_RMENU,
-    };
+    use windows::Win32::UI::Input::KeyboardAndMouse::{VK_LMENU, VK_MENU, VK_RMENU};
 
-    unsafe fn key_down(vk: i32) -> bool {
-        GetAsyncKeyState(vk) as u16 & 0x8000 != 0
-    }
-
-    unsafe {
-        key_down(VK_MENU.0 as i32) || key_down(VK_LMENU.0 as i32) || key_down(VK_RMENU.0 as i32)
-    }
+    crate::util::any_vk_down(&[VK_MENU.0, VK_LMENU.0, VK_RMENU.0])
 }
 
 fn focus_window_impl(hwnd_raw: isize, log_result: bool) -> bool {
     if log_result {
         log::debug(format!("focus_window hwnd={hwnd_raw}"));
     }
-    let hwnd = HWND(hwnd_raw as *mut _);
+    let hwnd = crate::win_cast::raw_to_hwnd(hwnd_raw);
     if hwnd.0.is_null() {
         log::warn("focus_window: null hwnd");
         return false;
@@ -164,8 +156,7 @@ fn focus_window_impl(hwnd_raw: isize, log_result: bool) -> bool {
         let target_thread = GetWindowThreadProcessId(hwnd, None);
         let current = GetCurrentThreadId();
 
-        let attached_fg =
-            fg_thread != 0 && AttachThreadInput(current, fg_thread, true).as_bool();
+        let attached_fg = fg_thread != 0 && AttachThreadInput(current, fg_thread, true).as_bool();
         let attached_target = target_thread != 0
             && target_thread != current
             && AttachThreadInput(current, target_thread, true).as_bool();
@@ -193,7 +184,7 @@ fn focus_window_impl(hwnd_raw: isize, log_result: bool) -> bool {
 pub fn foreground_is_fullscreen() -> bool {
     use windows::Win32::Foundation::RECT;
     use windows::Win32::Graphics::Gdi::{
-        GetMonitorInfoW, MonitorFromWindow, MONITOR_DEFAULTTONEAREST, MONITORINFO,
+        GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         GetDesktopWindow, GetForegroundWindow, GetShellWindow, GetWindowRect,
@@ -217,7 +208,7 @@ pub fn foreground_is_fullscreen() -> bool {
 
         let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
         let mut info = MONITORINFO {
-            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            cbSize: crate::win_cast::size_of_u32::<MONITORINFO>(),
             ..Default::default()
         };
         if !GetMonitorInfoW(monitor, &mut info).as_bool() {

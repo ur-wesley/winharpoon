@@ -54,7 +54,7 @@ pub fn enumerate_windows(exclude_hwnd: Option<isize>) -> Vec<WindowInfo> {
     unsafe {
         let _ = EnumWindows(
             Some(enum_callback),
-            LPARAM(&mut windows as *mut _ as isize),
+            crate::win_cast::ptr_to_lparam(&raw mut windows),
         );
     }
     if let Some(ex) = exclude_hwnd {
@@ -66,7 +66,7 @@ pub fn enumerate_windows(exclude_hwnd: Option<isize>) -> Vec<WindowInfo> {
 }
 
 unsafe extern "system" fn enum_callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
-    let list = &mut *(lparam.0 as *mut Vec<WindowInfo>);
+    let list = &mut *crate::win_cast::lparam_to_mut_ptr::<Vec<WindowInfo>>(lparam);
     if let Some(info) = window_info(hwnd) {
         list.push(info);
     }
@@ -80,7 +80,9 @@ unsafe fn window_info(hwnd: HWND) -> Option<WindowInfo> {
 
     let len = GetWindowTextLengthW(hwnd);
     let raw_title = if len > 0 {
-        let mut title_buf = vec![0u16; len as usize + 1];
+        // `len > 0` checked above, so the conversion below is exact.
+        let ulen = usize::try_from(len).unwrap_or(0);
+        let mut title_buf = vec![0u16; ulen.saturating_add(1)];
         GetWindowTextW(hwnd, &mut title_buf);
         util::from_wide(&title_buf)
     } else {
@@ -95,7 +97,7 @@ unsafe fn window_info(hwnd: HWND) -> Option<WindowInfo> {
 
     let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
     let mut buf = vec![0u16; 1024];
-    let mut size = buf.len() as u32;
+    let mut size = u32::try_from(buf.len()).unwrap_or(u32::MAX);
     let res = QueryFullProcessImageNameW(
         process,
         PROCESS_NAME_FORMAT(0),
@@ -104,11 +106,11 @@ unsafe fn window_info(hwnd: HWND) -> Option<WindowInfo> {
     );
     let _ = CloseHandle(process);
     res.ok()?;
-    let exe_path = PathBuf::from(util::from_wide(&buf[..size as usize]));
-    let exe_name = exe_path.file_name().map_or_else(
-        || "unknown".into(),
-        |s| s.to_string_lossy().into_owned(),
-    );
+    let end = usize::try_from(size).unwrap_or(0).min(buf.len());
+    let exe_path = PathBuf::from(util::from_wide(buf.get(..end).unwrap_or_default()));
+    let exe_name = exe_path
+        .file_name()
+        .map_or_else(|| "unknown".into(), |s| s.to_string_lossy().into_owned());
 
     if exe_name.eq_ignore_ascii_case("winharpoon.exe") {
         return None;
@@ -117,12 +119,16 @@ unsafe fn window_info(hwnd: HWND) -> Option<WindowInfo> {
     let process_name = process_name::process_display_name(&exe_path);
     let title = effective_title(&raw_title, &process_name);
     if !is_reasonable_title(&title) {
-        log::trace(format!("skip hwnd={:?}: bad title len={}", hwnd.0, title.len()));
+        log::trace(format!(
+            "skip hwnd={:?}: bad title len={}",
+            hwnd.0,
+            title.len()
+        ));
         return None;
     }
 
     Some(WindowInfo {
-        hwnd: hwnd.0 as isize,
+        hwnd: crate::win_cast::hwnd_to_raw(hwnd),
         title,
         exe_path,
         exe_name,
@@ -139,8 +145,8 @@ unsafe fn is_switchable_window(hwnd: HWND) -> bool {
     if DwmGetWindowAttribute(
         hwnd,
         DWMWA_CLOAKED,
-        (&mut cloaked as *mut u32).cast(),
-        std::mem::size_of::<u32>() as u32,
+        std::ptr::addr_of_mut!(cloaked).cast(),
+        crate::win_cast::size_of_u32::<u32>(),
     )
     .is_ok()
         && cloaked != 0
@@ -148,7 +154,8 @@ unsafe fn is_switchable_window(hwnd: HWND) -> bool {
         return false;
     }
 
-    let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+    // Bit-preserving reinterpretation of the style flags; no value change.
+    let ex_style = u32::from_ne_bytes(GetWindowLongW(hwnd, GWL_EXSTYLE).to_ne_bytes());
     if (ex_style & WS_EX_TOOLWINDOW.0) != 0 && (ex_style & WS_EX_APPWINDOW.0) == 0 {
         return false;
     }
@@ -163,8 +170,8 @@ unsafe fn is_switchable_window(hwnd: HWND) -> bool {
         if GetWindowRect(hwnd, &mut rect).is_err() {
             return false;
         }
-        let width = rect.right - rect.left;
-        let height = rect.bottom - rect.top;
+        let width = rect.right.saturating_sub(rect.left);
+        let height = rect.bottom.saturating_sub(rect.top);
         if width <= 0 || height <= 0 || width < MIN_WINDOW_WIDTH || height < MIN_WINDOW_HEIGHT {
             return false;
         }
@@ -184,7 +191,9 @@ fn is_reasonable_title(title: &str) -> bool {
     if trimmed.matches('@').count() > 4 {
         return false;
     }
-    if trimmed.starts_with("npm list") || trimmed.starts_with("pnpm list") || trimmed.starts_with("yarn list")
+    if trimmed.starts_with("npm list")
+        || trimmed.starts_with("pnpm list")
+        || trimmed.starts_with("yarn list")
     {
         return false;
     }

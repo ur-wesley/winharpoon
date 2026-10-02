@@ -9,8 +9,8 @@ use crate::modes::marks::{SharedMarks, ToggleMarkResult};
 use crate::ui::list::ListSelection;
 use crate::window::identity::WindowIdentity;
 use crate::window::{
-    capture_stack_snapshot, enumerate_windows, focus, get_foreground_window, restore_stack_snapshot,
-    StackSnapshot, WindowInfo,
+    capture_stack_snapshot, enumerate_windows, focus, get_foreground_window,
+    restore_stack_snapshot, StackSnapshot, WindowInfo,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,7 +106,11 @@ impl LauncherController {
         self.update_windows_and_selection(new_windows, max_results);
     }
 
-    pub(crate) fn update_windows_and_selection(&mut self, new_windows: Vec<WindowInfo>, max_results: usize) {
+    pub(crate) fn update_windows_and_selection(
+        &mut self,
+        new_windows: Vec<WindowInfo>,
+        max_results: usize,
+    ) {
         if new_windows != self.windows {
             let old_filtered = self.filtered_indices(max_results);
             let old_active_hwnd = self.active_window(&old_filtered).map(|w| w.hwnd);
@@ -117,18 +121,21 @@ impl LauncherController {
             let new_filtered = self.filtered_indices(max_results);
 
             if let Some(hwnd) = old_active_hwnd {
-                if let Some(new_pos) = new_filtered.iter().position(|&idx| self.windows[idx].hwnd == hwnd) {
+                if let Some(new_pos) = new_filtered
+                    .iter()
+                    .position(|&idx| self.windows.get(idx).is_some_and(|w| w.hwnd == hwnd))
+                {
                     self.selection.selected = new_pos;
                 } else if new_filtered.is_empty() {
                     self.selection.selected = 0;
                 } else if self.selection.selected >= new_filtered.len() {
-                    self.selection.selected = new_filtered.len() - 1;
+                    self.selection.selected = new_filtered.len().saturating_sub(1);
                 }
             } else {
                 if new_filtered.is_empty() {
                     self.selection.selected = 0;
                 } else if self.selection.selected >= new_filtered.len() {
-                    self.selection.selected = new_filtered.len() - 1;
+                    self.selection.selected = new_filtered.len().saturating_sub(1);
                 }
             }
             self.selection.hovered = None;
@@ -172,12 +179,12 @@ impl LauncherController {
 
     pub fn active_window<'a>(&'a self, filtered: &[usize]) -> Option<&'a WindowInfo> {
         self.active_window_index(filtered)
-            .map(|idx| &self.windows[idx])
+            .and_then(|idx| self.windows.get(idx))
     }
 
     pub fn keyboard_window<'a>(&'a self, filtered: &[usize]) -> Option<&'a WindowInfo> {
         self.keyboard_window_index(filtered)
-            .map(|idx| &self.windows[idx])
+            .and_then(|idx| self.windows.get(idx))
     }
 
     pub fn handle_action(
@@ -197,8 +204,8 @@ impl LauncherController {
                 LauncherEffect::None
             }
             LauncherAction::Hover(hovered) => {
-                self.selection.hovered = hovered;
-                if hovered.is_some() {
+                if let Some(row) = hovered {
+                    self.selection.hover(row, filtered.len());
                     self.preview_active = true;
                 }
                 LauncherEffect::None
@@ -247,7 +254,10 @@ impl LauncherController {
         let Some(&idx) = filtered.get(active_row) else {
             return LauncherEffect::None;
         };
-        let hwnd = self.windows[idx].hwnd;
+        let Some(win) = self.windows.get(idx) else {
+            return LauncherEffect::None;
+        };
+        let hwnd = win.hwnd;
         if self.preview_hwnd == Some(hwnd) {
             return LauncherEffect::None;
         }
@@ -430,16 +440,20 @@ mod tests {
     }
 
     #[test]
-    fn keyboard_commit_ignores_stray_hover() {
+    fn hover_updates_selection_for_keyboard_and_enter() {
         let mut controller = sample_controller(vec![
             test_window(1, "One", "one"),
             test_window(2, "Two", "two"),
         ]);
-        controller.selection.selected = 0;
-        controller.selection.hovered = Some(1);
         let filtered = vec![0, 1];
-        // Enter path must use keyboard selection, hover only drives preview.
-        assert_eq!(controller.keyboard_window_index(&filtered), Some(0));
+        controller.handle_action(
+            LauncherAction::Hover(Some(1)),
+            &crate::modes::marks::shared_marks(),
+            &filtered,
+        );
+        assert_eq!(controller.selection.selected, 1);
+        // Enter commits the same unified selection hover just moved.
+        assert_eq!(controller.keyboard_window_index(&filtered), Some(1));
         assert_eq!(controller.active_window_index(&filtered), Some(1));
     }
 }

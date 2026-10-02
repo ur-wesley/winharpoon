@@ -2,9 +2,7 @@ use std::path::Path;
 
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::CloseHandle;
-use windows::Win32::System::Com::{
-    CoCreateInstance, CLSCTX_INPROC_SERVER,
-};
+use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
 use windows::Win32::System::Threading::{
     CreateProcessW, CREATE_BREAKAWAY_FROM_JOB, CREATE_UNICODE_ENVIRONMENT, PROCESS_CREATION_FLAGS,
     PROCESS_INFORMATION, STARTUPINFOW,
@@ -75,7 +73,7 @@ fn shell_open(path: &Path) -> bool {
             PCWSTR::null(),
             SW_SHOWNORMAL,
         );
-        let ok = (result.0 as isize) > 32;
+        let ok = result.0.addr() > 32;
         if ok {
             log::debug(format!("apps: launched {}", path.display()));
         } else {
@@ -122,7 +120,7 @@ fn launch_detached(target: &Path, args: &str) -> bool {
 
     unsafe {
         let si = STARTUPINFOW {
-            cb: std::mem::size_of::<STARTUPINFOW>() as u32,
+            cb: crate::win_cast::size_of_u32::<STARTUPINFOW>(),
             ..Default::default()
         };
         let mut pi = PROCESS_INFORMATION::default();
@@ -175,7 +173,8 @@ fn launch_detached(target: &Path, args: &str) -> bool {
     }
 }
 
-fn launch_aumid(aumid: &str, args: &str) -> bool {    use windows::Win32::UI::Shell::IApplicationActivationManager;
+fn launch_aumid(aumid: &str, args: &str) -> bool {
+    use windows::Win32::UI::Shell::IApplicationActivationManager;
 
     let activator: IApplicationActivationManager = unsafe {
         match CoCreateInstance(
@@ -200,7 +199,9 @@ fn launch_aumid(aumid: &str, args: &str) -> bool {    use windows::Win32::UI::Sh
             windows::Win32::UI::Shell::ACTIVATEOPTIONS(0),
         );
         if let Err(e) = hr {
-            log::debug(format!("apps: ActivateApplication failed {e:?} for {aumid}"));
+            log::debug(format!(
+                "apps: ActivateApplication failed {e:?} for {aumid}"
+            ));
             return false;
         }
         log::debug(format!("apps: activated AUMID {aumid}"));

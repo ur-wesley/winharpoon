@@ -67,13 +67,16 @@ impl TrayMenuController {
             .input(|i| i.viewport().native_pixels_per_point)
             .unwrap_or(1.0);
 
-        let tray_x = self.anchor.rect_x as f32 / ppp;
-        let tray_y = self.anchor.rect_y as f32 / ppp;
-        let tray_w = self.anchor.rect_w as f32 / ppp;
-        let tray_h = self.anchor.rect_h as f32 / ppp;
+        let tray_x = crate::win_cast::f64_to_f32(self.anchor.rect_x) / ppp;
+        let tray_y = crate::win_cast::f64_to_f32(self.anchor.rect_y) / ppp;
+        let tray_w = crate::win_cast::u32_to_f32(self.anchor.rect_w) / ppp;
+        let tray_h = crate::win_cast::u32_to_f32(self.anchor.rect_h) / ppp;
 
-        let work_area =
-            crate::platform::monitor_work_area_at_physical_point(ctx, self.anchor.click_x, self.anchor.click_y);
+        let work_area = crate::platform::monitor_work_area_at_physical_point(
+            ctx,
+            self.anchor.click_x,
+            self.anchor.click_y,
+        );
 
         let tray_screen_y = tray_y;
         let taskbar_at_bottom = tray_screen_y > work_area.center().y;
@@ -85,14 +88,8 @@ impl TrayMenuController {
             tray_y + tray_h + 10.0
         };
 
-        menu_x = menu_x.clamp(
-            work_area.min.x + 8.0,
-            work_area.max.x - content.x - 8.0,
-        );
-        menu_y = menu_y.clamp(
-            work_area.min.y + 8.0,
-            work_area.max.y - content.y - 8.0,
-        );
+        menu_x = menu_x.clamp(work_area.min.x + 8.0, work_area.max.x - content.x - 8.0);
+        menu_y = menu_y.clamp(work_area.min.y + 8.0, work_area.max.y - content.y - 8.0);
 
         egui::Rect::from_min_size(egui::pos2(menu_x, menu_y), content)
     }

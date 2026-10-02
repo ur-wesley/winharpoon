@@ -70,11 +70,7 @@ impl SettingsController {
         crate::util::release_stuck_modifier_keys();
     }
 
-    pub fn handle_action(
-        &mut self,
-        action: SettingsAction,
-        config: &Arc<Mutex<Config>>,
-    ) {
+    pub fn handle_action(&mut self, action: SettingsAction, config: &Arc<Mutex<Config>>) {
         match action {
             SettingsAction::ResetDefaults => {
                 log::debug("settings reset defaults");
@@ -197,7 +193,11 @@ impl SettingsController {
             BindingSection {
                 title: "Marks switcher",
                 subtitle: "Hold to open the overlay, use next/prev to cycle, release to confirm",
-                labels: vec!["marks_switcher", "marks_switcher_next", "marks_switcher_prev"],
+                labels: vec![
+                    "marks_switcher",
+                    "marks_switcher_next",
+                    "marks_switcher_prev",
+                ],
             },
             BindingSection {
                 title: "Marks",

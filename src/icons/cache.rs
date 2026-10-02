@@ -20,12 +20,7 @@ impl IconCache {
         }
     }
 
-    pub fn file_icon(
-        &mut self,
-        ctx: &Context,
-        path: &Path,
-        size: u32,
-    ) -> Option<&TextureHandle> {
+    pub fn file_icon(&mut self, ctx: &Context, path: &Path, size: u32) -> Option<&TextureHandle> {
         if path.as_os_str().is_empty() {
             return None;
         }
@@ -51,7 +46,7 @@ impl IconCache {
 fn texture_key(path: &Path) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
     for b in path.to_string_lossy().bytes() {
-        hash ^= b as u64;
+        hash ^= u64::from(b);
         hash = hash.wrapping_mul(0x0100_0000_01b3);
     }
     hash

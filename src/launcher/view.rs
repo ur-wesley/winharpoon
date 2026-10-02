@@ -80,11 +80,13 @@ pub fn render_launcher(
                     ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Home));
                     controller.selection.selected = 0;
                     controller.selection.hovered = None;
+                    controller.selection.scroll_to_selected = true;
                     controller.preview_active = true;
                 } else if ctx.input(|i| i.key_pressed(egui::Key::End)) {
                     ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::End));
                     controller.selection.selected = filtered.len().saturating_sub(1);
                     controller.selection.hovered = None;
+                    controller.selection.scroll_to_selected = true;
                     controller.preview_active = true;
                 }
             }
@@ -92,6 +94,10 @@ pub fn render_launcher(
             ui.add_space(6.0);
 
             let list_width = ui.available_width();
+            // Hover only takes over selection while the mouse is actually
+            // moving — otherwise a resting cursor would snap the selection
+            // back every frame and lock out keyboard nav.
+            let pointer_moved = ctx.input(|i| i.pointer.delta() != egui::Vec2::ZERO);
             egui::ScrollArea::vertical()
                 .id_salt("launcher_list")
                 .auto_shrink([false, false])
@@ -114,14 +120,16 @@ pub fn render_launcher(
                             }
 
                             for (row, win_idx) in filtered.iter().enumerate() {
-                                let win = &controller.windows[*win_idx];
+                                let Some(win) = controller.windows.get(*win_idx) else {
+                                    continue;
+                                };
                                 let is_fg = controller.foreground_hwnd == Some(win.hwnd);
-                                let keyboard_highlight =
-                                    controller.selection.hovered.is_none() && row == selected_row;
+                                let keyboard_highlight = row == selected_row;
 
                                 let mark_slot = {
                                     let marks_guard = marks.lock();
-                                    let identity = crate::window::identity::WindowIdentity::from_window(win);
+                                    let identity =
+                                        crate::window::identity::WindowIdentity::from_window(win);
                                     marks_guard.store.find_slot(&identity)
                                 };
 
@@ -138,8 +146,11 @@ pub fn render_launcher(
                                 let row_result = searchable_list_row(
                                     ui,
                                     &SearchableListRowProps {
-                                        icon: icon_cache
-                                            .file_icon(&ctx, &win.exe_path, LIST_ICON_SIZE as u32),
+                                        icon: icon_cache.file_icon(
+                                            &ctx,
+                                            &win.exe_path,
+                                            crate::win_cast::f32_to_u32(LIST_ICON_SIZE),
+                                        ),
                                         title: &display_title,
                                         highlight: if keyboard_highlight {
                                             RowHighlight::Keyboard
@@ -153,7 +164,10 @@ pub fn render_launcher(
                                     },
                                 );
 
-                                if row_result.highlight == RowHighlight::Hover {
+                                if row_result.highlight == RowHighlight::Hover
+                                    && pointer_moved
+                                    && row != selected_row
+                                {
                                     actions.push(LauncherAction::Hover(Some(row)));
                                 }
 
@@ -173,19 +187,15 @@ pub fn render_launcher(
     }
 
     if ctx.input(|i| {
-        i.key_pressed(egui::Key::M)
-            && i.modifiers.ctrl
-            && !i.modifiers.shift
-            && !i.modifiers.alt
+        i.key_pressed(egui::Key::M) && i.modifiers.ctrl && !i.modifiers.shift && !i.modifiers.alt
     }) {
         ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::M));
         actions.push(LauncherAction::ToggleMark);
     }
 
     if controller.active_window(filtered).is_some() {
-        if ctx.input(|i| {
-            i.key_pressed(egui::Key::ArrowUp) && i.modifiers.ctrl && i.modifiers.shift
-        }) {
+        if ctx.input(|i| i.key_pressed(egui::Key::ArrowUp) && i.modifiers.ctrl && i.modifiers.shift)
+        {
             ctx.input_mut(|i| {
                 i.consume_key(
                     egui::Modifiers::CTRL | egui::Modifiers::SHIFT,
@@ -193,9 +203,9 @@ pub fn render_launcher(
                 );
             });
             actions.push(LauncherAction::MoveMarkSlot { up: true });
-        } else if ctx.input(|i| {
-            i.key_pressed(egui::Key::ArrowDown) && i.modifiers.ctrl && i.modifiers.shift
-        }) {
+        } else if ctx
+            .input(|i| i.key_pressed(egui::Key::ArrowDown) && i.modifiers.ctrl && i.modifiers.shift)
+        {
             ctx.input_mut(|i| {
                 i.consume_key(
                     egui::Modifiers::CTRL | egui::Modifiers::SHIFT,
