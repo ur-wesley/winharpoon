@@ -16,6 +16,7 @@ pub struct AppState {
     pub favorites: SharedFavorites,
     pub hotkey_conflicts: usize,
     pub registration_results: Vec<HotkeyRegistrationResult>,
+    pub update_state: crate::updater::UpdateState,
 }
 
 impl AppState {
@@ -27,6 +28,7 @@ impl AppState {
             favorites,
             hotkey_conflicts: 0,
             registration_results: Vec::new(),
+            update_state: crate::updater::UpdateState::None,
         }
     }
 }

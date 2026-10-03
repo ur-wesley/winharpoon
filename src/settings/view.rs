@@ -103,7 +103,7 @@ pub fn render_settings(
                             "Startup and background behavior",
                         );
                         ui.add_space(10.0);
-                        render_general_row(ui, controller, &mut actions);
+                        render_general_row(ui, controller, state, &mut actions);
                     });
                     ui.add_space(12.0);
 
@@ -171,6 +171,7 @@ pub fn render_settings(
 fn render_general_row(
     ui: &mut egui::Ui,
     controller: &SettingsController,
+    state: &Arc<Mutex<AppState>>,
     actions: &mut Vec<SettingsAction>,
 ) {
     let mut autostart = controller.draft.general.autostart;
@@ -191,6 +192,95 @@ fn render_general_row(
         });
     });
     ui.add_space(10.0);
+
+    let mut check_updates = controller.draft.general.check_updates_on_startup;
+    ui.horizontal(|ui| {
+        ui.vertical(|ui| {
+            ui.set_min_width(220.0);
+            ui.label(
+                egui::RichText::new("Check for updates on startup")
+                    .size(13.5)
+                    .strong(),
+            );
+            native_ui::muted_label(ui, "Automatically check for new versions on GitHub");
+        });
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.checkbox(&mut check_updates, "Enabled").changed() {
+                actions.push(SettingsAction::SetCheckUpdatesOnStartup(check_updates));
+            }
+        });
+    });
+    ui.add_space(10.0);
+
+    let update_state = {
+        let state_guard = state.lock();
+        state_guard.update_state.clone()
+    };
+
+    ui.horizontal(|ui| {
+        ui.vertical(|ui| {
+            ui.set_min_width(220.0);
+            ui.label(
+                egui::RichText::new("Application updates")
+                    .size(13.5)
+                    .strong(),
+            );
+            match &update_state {
+                crate::updater::UpdateState::None => {
+                    native_ui::muted_label(ui, "Running the latest version");
+                }
+                crate::updater::UpdateState::Checking => {
+                    ui.label(
+                        egui::RichText::new("Checking for updates...").color(native_ui::ACCENT),
+                    );
+                }
+                crate::updater::UpdateState::Available { version, .. } => {
+                    ui.label(
+                        egui::RichText::new(format!("Version v{version} is available!"))
+                            .strong()
+                            .color(native_ui::SUCCESS),
+                    );
+                }
+                crate::updater::UpdateState::Downloading { progress } => {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "Downloading update: {:.0}%",
+                            progress * 100.0
+                        ))
+                        .color(native_ui::ACCENT),
+                    );
+                }
+                crate::updater::UpdateState::Downloaded { .. } => {
+                    ui.label(
+                        egui::RichText::new("Update downloaded. Launching installer...")
+                            .strong()
+                            .color(native_ui::SUCCESS),
+                    );
+                }
+                crate::updater::UpdateState::Error(err) => {
+                    ui.colored_label(native_ui::DANGER, format!("Update error: {err}"));
+                }
+            }
+        });
+        ui.with_layout(
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| match &update_state {
+                crate::updater::UpdateState::None | crate::updater::UpdateState::Error(_)
+                    if native_ui::secondary_button(ui, "Check for updates").clicked() =>
+                {
+                    actions.push(SettingsAction::CheckForUpdates);
+                }
+                crate::updater::UpdateState::Available { .. }
+                    if native_ui::primary_button(ui, "Download & Install").clicked() =>
+                {
+                    actions.push(SettingsAction::DownloadAndInstallUpdate);
+                }
+                _ => {}
+            },
+        );
+    });
+    ui.add_space(10.0);
+
     let config_path = paths::config_path();
     native_ui::muted_label(ui, &format!("Config: {}", config_path.display()));
     ui.add_space(6.0);

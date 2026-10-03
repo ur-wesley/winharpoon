@@ -14,6 +14,9 @@ pub enum SettingsAction {
     ResetDefaults,
     Save,
     SetAutostart(bool),
+    SetCheckUpdatesOnStartup(bool),
+    CheckForUpdates,
+    DownloadAndInstallUpdate,
     SetAltDoubleClick(bool),
     SetAltDoubleClickScope(String),
     SetDoubleTapKey(String),
@@ -70,7 +73,12 @@ impl SettingsController {
         crate::util::release_stuck_modifier_keys();
     }
 
-    pub fn handle_action(&mut self, action: SettingsAction, config: &Arc<Mutex<Config>>) {
+    pub fn handle_action(
+        &mut self,
+        action: SettingsAction,
+        state: &Arc<Mutex<AppState>>,
+        config: &Arc<Mutex<Config>>,
+    ) {
         match action {
             SettingsAction::ResetDefaults => {
                 log::debug("settings reset defaults");
@@ -99,6 +107,31 @@ impl SettingsController {
                         self.status = format!("Failed to update autostart: {err}");
                         log::error(format!("autostart toggle failed: {err}"));
                     }
+                }
+            }
+            SettingsAction::SetCheckUpdatesOnStartup(enabled) => {
+                self.draft.general.check_updates_on_startup = enabled;
+                if let Ok(status) = SettingsService::persist_general(&self.draft, config) {
+                    self.validation_errors.clear();
+                    self.status = status;
+                }
+            }
+            SettingsAction::CheckForUpdates => {
+                crate::updater::check_for_updates(state.clone(), true);
+            }
+            SettingsAction::DownloadAndInstallUpdate => {
+                let download_url = {
+                    let state_guard = state.lock();
+                    if let crate::updater::UpdateState::Available { download_url, .. } =
+                        &state_guard.update_state
+                    {
+                        Some(download_url.clone())
+                    } else {
+                        None
+                    }
+                };
+                if let Some(url) = download_url {
+                    crate::updater::start_download_and_install(state.clone(), url);
                 }
             }
             SettingsAction::SetAltDoubleClick(enabled) => {

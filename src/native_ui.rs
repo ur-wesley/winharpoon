@@ -187,7 +187,7 @@ pub fn section_frame() -> egui::Frame {
 
 pub fn tray_menu_divider(ui: &mut egui::Ui) {
     let rect = ui
-        .allocate_exact_size(egui::vec2(ui.available_width(), 5.0), egui::Sense::hover())
+        .allocate_exact_size(egui::vec2(ui.available_width(), 4.0), egui::Sense::hover())
         .1
         .rect;
     let line = egui::Rect::from_center_size(rect.center(), egui::vec2(rect.width() - 6.0, 1.0));
@@ -229,15 +229,24 @@ pub fn overlay_panel_frame() -> egui::Frame {
         .inner_margin(egui::Margin::same(10))
 }
 
-pub fn show_popup_panel<R>(
-    ui: &mut egui::Ui,
-    add_contents: impl FnOnce(&mut egui::Ui) -> R,
-) -> egui::InnerResponse<R> {
-    overlay_panel_frame().show(ui, add_contents)
+pub fn tray_panel_frame() -> egui::Frame {
+    egui::Frame::NONE
+        .fill(POPUP_PANEL)
+        .stroke(egui::Stroke::new(1.0, GLASS_BORDER))
+        .corner_radius(PANEL_CORNER_RADIUS)
+        .inner_margin(egui::Margin::same(6))
 }
 
 pub fn render_overlay_shell<R>(
     ui: &mut egui::Ui,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> (R, egui::Rect) {
+    render_overlay_shell_with(ui, overlay_panel_frame(), add_contents)
+}
+
+pub fn render_overlay_shell_with<R>(
+    ui: &mut egui::Ui,
+    frame: egui::Frame,
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> (R, egui::Rect) {
     let mut panel_rect = egui::Rect::NOTHING;
@@ -252,7 +261,7 @@ pub fn render_overlay_shell<R>(
                 .inner_margin(egui::Margin::same(margin)),
         )
         .show_inside(ui, |ui| {
-            let inner = show_popup_panel(ui, add_contents);
+            let inner = frame.show(ui, add_contents);
             panel_rect = inner.response.rect;
             inner.inner
         });

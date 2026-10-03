@@ -3,9 +3,9 @@ use eframe::egui;
 use crate::icons::ui_icons::{self, TrayIconKind};
 use crate::native_ui;
 
-pub const ROW_HEIGHT: f32 = 26.0;
-pub const SLOT_ROW_HEIGHT: f32 = 22.0;
-const ROW_LEFT_PADDING: f32 = 10.0;
+pub const ROW_HEIGHT: f32 = 24.0;
+pub const SLOT_ROW_HEIGHT: f32 = 20.0;
+const ROW_LEFT_PADDING: f32 = 8.0;
 const ROW_ICON_WIDTH: f32 = 22.0;
 const ROW_ICON_TEXT_GAP: f32 = 4.0;
 const ROW_TEXT_LEFT: f32 = ROW_LEFT_PADDING + ROW_ICON_WIDTH + ROW_ICON_TEXT_GAP;
@@ -44,7 +44,7 @@ pub fn menu_row(ui: &mut egui::Ui, props: &MenuRowProps<'_>) -> egui::Response {
         }
         let text_rect = egui::Rect::from_min_max(
             egui::pos2(rect.min.x + ROW_TEXT_LEFT, rect.min.y),
-            egui::pos2(rect.max.x - 4.0, rect.max.y),
+            egui::pos2(rect.max.x - ROW_LEFT_PADDING, rect.max.y),
         );
         native_ui::tray_menu_clipped_label(ui, text_rect, props.label, 12.0, text_color);
     }
@@ -111,7 +111,7 @@ pub fn slot_row(ui: &mut egui::Ui, props: &SlotRowProps<'_>) -> egui::Response {
         );
         let text_rect = egui::Rect::from_min_max(
             egui::pos2(rect.min.x + ROW_TEXT_LEFT, rect.min.y),
-            egui::pos2(rect.max.x - 4.0, rect.max.y),
+            egui::pos2(rect.max.x - ROW_LEFT_PADDING, rect.max.y),
         );
         let text_color = if props.filled {
             egui::Color32::from_rgb(210, 214, 226)

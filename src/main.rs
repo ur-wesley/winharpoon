@@ -16,6 +16,7 @@ mod platform;
 mod settings;
 mod tray;
 mod ui;
+mod updater;
 mod util;
 mod win_cast;
 mod window;
@@ -96,6 +97,10 @@ fn main() {
     let hotkeys = Arc::new(Mutex::new(hotkey_manager));
     let _tray = init_tray(&state);
     log::debug("tray icon initialized, entering message loop");
+
+    if state.lock().config.lock().general.check_updates_on_startup {
+        updater::check_for_updates(state.clone(), false);
+    }
 
     hotkeys.lock().run_message_loop(
         &state,

@@ -63,25 +63,28 @@ impl SettingsPanel {
         let output = render_settings(ui, &self.controller, state, config);
 
         for action in output.actions {
-            self.controller.handle_action(action, config);
+            self.controller.handle_action(action, state, config);
         }
 
         if let Some(label) = self.controller.capture_label.clone() {
             match poll_chord_capture(&ctx, true) {
                 ChordCaptureResult::Cancelled => {
                     self.controller
-                        .handle_action(SettingsAction::CancelCapture, config);
+                        .handle_action(SettingsAction::CancelCapture, state, config);
                 }
                 ChordCaptureResult::Captured(chord) => {
-                    self.controller
-                        .handle_action(SettingsAction::FinishCapture { label, chord }, config);
+                    self.controller.handle_action(
+                        SettingsAction::FinishCapture { label, chord },
+                        state,
+                        config,
+                    );
                 }
                 ChordCaptureResult::Pending => {}
             }
 
             if ctx.input(|i| i.pointer.any_click()) && !output.capture_ui_used {
                 self.controller
-                    .handle_action(SettingsAction::CancelCapture, config);
+                    .handle_action(SettingsAction::CancelCapture, state, config);
             }
         }
     }

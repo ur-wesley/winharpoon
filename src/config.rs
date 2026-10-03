@@ -21,10 +21,21 @@ pub struct Config {
     pub apps: AppsConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeneralConfig {
     #[serde(default)]
     pub autostart: bool,
+    #[serde(default = "default_true")]
+    pub check_updates_on_startup: bool,
+}
+
+impl Default for GeneralConfig {
+    fn default() -> Self {
+        Self {
+            autostart: false,
+            check_updates_on_startup: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

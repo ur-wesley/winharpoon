@@ -8,6 +8,7 @@ pub enum TrayAction {
     RescanApps,
     Quit,
     JumpSlot(u8),
+    UpdateApp,
 }
 
 pub struct TrayMenuController {
@@ -21,7 +22,7 @@ impl Default for TrayMenuController {
         Self {
             visible: false,
             anchor: TrayClickInfo::default(),
-            panel_width: 220.0,
+            panel_width: 200.0,
         }
     }
 }
@@ -38,9 +39,9 @@ impl TrayMenuController {
 
     pub fn menu_height() -> f32 {
         const HEADER_HEIGHT: f32 = 28.0;
-        const DIVIDER_HEIGHT: f32 = 5.0;
-        const ROW_HEIGHT: f32 = 26.0;
-        const SLOT_ROW_HEIGHT: f32 = 22.0;
+        const DIVIDER_HEIGHT: f32 = 4.0;
+        const ROW_HEIGHT: f32 = 24.0;
+        const SLOT_ROW_HEIGHT: f32 = 20.0;
         const SECTION_LABEL_HEIGHT: f32 = 14.0;
         const FRAME_PADDING_V: f32 = 12.0;
         const SLOT_ROWS: f32 = 9.0;
