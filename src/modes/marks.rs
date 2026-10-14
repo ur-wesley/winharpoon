@@ -137,6 +137,22 @@ impl MarksStore {
             .map_or_else(|| "empty".into(), WindowIdentity::display_label)
     }
 
+    pub fn unmark_slot(&mut self, slot: u8) -> bool {
+        log::debug(format!("unmark_slot {slot}"));
+        let removed = self.slots.remove(&slot.to_string()).is_some();
+        if removed {
+            let _ = self.save();
+            log::info(format!("unmarked slot {slot}"));
+        }
+        removed
+    }
+
+    pub fn clear_slots(&mut self) {
+        log::debug("clear_slots");
+        self.slots.clear();
+        let _ = self.save();
+    }
+
     pub fn find_slot(&self, identity: &WindowIdentity) -> Option<u8> {
         (1..=9).find(|slot| {
             self.slots
@@ -178,30 +194,31 @@ impl MarksStore {
         ToggleMarkResult::AllSlotsFull { app }
     }
 
+    /// Stepwise reorder: move the mark in `slot` one slot number up
+    /// (`earlier`) or down. Occupied targets swap; empty targets relocate.
+    /// No-op at the 1/9 edges or when `slot` is empty/out of range.
     pub fn move_mark_slot(&mut self, slot: u8, earlier: bool) -> bool {
-        let filled: Vec<u8> = (1..=9)
-            .filter(|s| self.slots.contains_key(&s.to_string()))
-            .collect();
-        let Some(pos) = filled.iter().position(|&s| s == slot) else {
+        if !(1..=9).contains(&slot) {
             return false;
-        };
-        let swap_with = if earlier {
-            if pos == 0 {
-                return false;
-            }
-            let Some(&prev) = filled.get(pos.saturating_sub(1)) else {
+        }
+        if !self.slots.contains_key(&slot.to_string()) {
+            return false;
+        }
+        let target = if earlier {
+            let Some(prev) = slot.checked_sub(1) else {
                 return false;
             };
             prev
-        } else if pos.saturating_add(1) >= filled.len() {
-            return false;
         } else {
-            let Some(&next) = filled.get(pos.saturating_add(1)) else {
+            let Some(next) = slot.checked_add(1) else {
                 return false;
             };
             next
         };
-        self.swap_slots(slot, swap_with);
+        if !(1..=9).contains(&target) {
+            return false;
+        }
+        self.swap_slots(slot, target);
         true
     }
 
@@ -360,29 +377,62 @@ mod tests {
     }
 
     #[test]
-    fn move_mark_slot_swaps_with_neighbor() {
+    fn move_mark_slot_steps_into_empty_slot() {
         let mut store = MarksStore::default();
         store.slots.insert("1".into(), identity("a"));
-        store.slots.insert("3".into(), identity("b"));
-        store.slots.insert("5".into(), identity("c"));
+        store.slots.insert("5".into(), identity("b"));
 
-        assert!(store.move_mark_slot(3, true));
-        assert_eq!(store.slots.get("1").map(|i| i.title.as_str()), Some("b"));
-        assert_eq!(store.slots.get("3").map(|i| i.title.as_str()), Some("a"));
+        assert!(store.move_mark_slot(5, true));
+        assert!(!store.slots.contains_key("5"));
+        assert_eq!(store.slots.get("4").map(|i| i.title.as_str()), Some("b"));
+        assert_eq!(store.slots.get("1").map(|i| i.title.as_str()), Some("a"));
 
-        assert!(store.move_mark_slot(3, false));
-        assert_eq!(store.slots.get("3").map(|i| i.title.as_str()), Some("c"));
+        assert!(store.move_mark_slot(4, false));
+        assert_eq!(store.slots.get("5").map(|i| i.title.as_str()), Some("b"));
+    }
+
+    #[test]
+    fn move_mark_slot_swaps_when_target_occupied() {
+        let mut store = MarksStore::default();
+        store.slots.insert("4".into(), identity("a"));
+        store.slots.insert("5".into(), identity("b"));
+
+        assert!(store.move_mark_slot(5, true));
+        assert_eq!(store.slots.get("4").map(|i| i.title.as_str()), Some("b"));
         assert_eq!(store.slots.get("5").map(|i| i.title.as_str()), Some("a"));
     }
 
     #[test]
     fn move_mark_slot_noop_at_edges() {
         let mut store = MarksStore::default();
-        store.slots.insert("2".into(), identity("only"));
+        store.slots.insert("1".into(), identity("edge"));
+        store.slots.insert("9".into(), identity("other"));
 
+        assert!(!store.move_mark_slot(1, true));
+        assert!(!store.move_mark_slot(9, false));
         assert!(!store.move_mark_slot(2, true));
-        assert!(!store.move_mark_slot(2, false));
-        assert!(!store.move_mark_slot(9, true));
+        assert!(!store.move_mark_slot(0, true));
+        assert!(!store.move_mark_slot(10, false));
+        assert_eq!(store.slots.get("1").map(|i| i.title.as_str()), Some("edge"));
+        assert_eq!(
+            store.slots.get("9").map(|i| i.title.as_str()),
+            Some("other")
+        );
+    }
+
+    #[test]
+    fn unmark_and_clear_slots() {
+        let mut store = MarksStore::default();
+        store.slots.insert("1".into(), identity("a"));
+        store.slots.insert("2".into(), identity("b"));
+
+        assert!(store.unmark_slot(1));
+        assert!(!store.unmark_slot(1));
+        assert!(!store.unmark_slot(9));
+        assert!(store.slots.contains_key("2"));
+
+        store.clear_slots();
+        assert!(store.slots.is_empty());
     }
 
     #[test]

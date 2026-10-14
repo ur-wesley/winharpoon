@@ -360,6 +360,15 @@ pub fn small_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     ui.add(button)
 }
 
+pub fn icon_small_button(ui: &mut egui::Ui, icon: egui::RichText) -> egui::Response {
+    let button = egui::Button::new(icon)
+        .fill(GLASS_HOVER)
+        .stroke(egui::Stroke::new(1.0, GLASS_BORDER))
+        .corner_radius(8)
+        .min_size(egui::vec2(28.0, 24.0));
+    ui.add(button)
+}
+
 pub fn icon_slot(ui: &mut egui::Ui, size: egui::Vec2, content: impl FnOnce(&mut egui::Ui)) {
     ui.allocate_ui_with_layout(
         size,

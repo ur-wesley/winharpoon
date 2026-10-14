@@ -13,6 +13,7 @@ use crate::settings::service::SettingsService;
 pub enum SettingsAction {
     ResetDefaults,
     Save,
+    SelectTab(SettingsTab),
     SetAutostart(bool),
     SetAltDoubleClick(bool),
     SetAltDoubleClickScope(String),
@@ -22,6 +23,26 @@ pub enum SettingsAction {
     CancelCapture,
     FinishCapture { label: String, chord: String },
     ClearBinding(String),
+    UnmarkSlot(u8),
+    ClearMarks,
+    MoveMarkSlot { slot: u8, up: bool },
+    JumpToSlot(u8),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SettingsTab {
+    #[default]
+    Settings,
+    Marks,
+}
+
+impl SettingsTab {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Settings => "Settings",
+            Self::Marks => "Marked windows",
+        }
+    }
 }
 
 pub struct SettingsController {
@@ -30,6 +51,7 @@ pub struct SettingsController {
     pub capture_label: Option<String>,
     pub validation_errors: Vec<ConfigValidationError>,
     pub status: String,
+    pub active_tab: SettingsTab,
 }
 
 impl SettingsController {
@@ -40,6 +62,7 @@ impl SettingsController {
             capture_label: None,
             validation_errors: Vec::new(),
             status: String::new(),
+            active_tab: SettingsTab::Settings,
         }
     }
 
@@ -70,7 +93,12 @@ impl SettingsController {
         crate::util::release_stuck_modifier_keys();
     }
 
-    pub fn handle_action(&mut self, action: SettingsAction, config: &Arc<Mutex<Config>>) {
+    pub fn handle_action(
+        &mut self,
+        action: SettingsAction,
+        config: &Arc<Mutex<Config>>,
+        marks: &crate::modes::marks::SharedMarks,
+    ) {
         match action {
             SettingsAction::ResetDefaults => {
                 log::debug("settings reset defaults");
@@ -80,6 +108,9 @@ impl SettingsController {
             SettingsAction::Save => {
                 log::debug("try_save");
                 self.persist_and_reload(config);
+            }
+            SettingsAction::SelectTab(tab) => {
+                self.active_tab = tab;
             }
             SettingsAction::SetAutostart(enabled) => {
                 self.draft.general.autostart = enabled;
@@ -134,6 +165,26 @@ impl SettingsController {
             }
             SettingsAction::ClearBinding(label) => {
                 self.finish_binding(&label, String::new(), config);
+            }
+            SettingsAction::UnmarkSlot(slot) => {
+                marks.lock().store.unmark_slot(slot);
+                self.status = format!("Unmarked slot {slot}.");
+            }
+            SettingsAction::ClearMarks => {
+                marks.lock().store.clear_slots();
+                self.status = "Cleared all marks.".into();
+            }
+            SettingsAction::MoveMarkSlot { slot, up } => {
+                if marks.lock().store.move_mark_slot(slot, up) {
+                    self.status = format!("Moved slot {slot}.");
+                }
+            }
+            SettingsAction::JumpToSlot(slot) => {
+                if marks.lock().store.jump_slot(slot) {
+                    self.status = format!("Focused slot {slot}.");
+                } else {
+                    self.status = format!("Slot {slot} window not found.");
+                }
             }
         }
     }
