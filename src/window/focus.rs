@@ -71,27 +71,6 @@ pub fn restore_stack_snapshot(snapshot: &StackSnapshot) {
     }
 }
 
-pub fn preview_window(hwnd_raw: isize) {
-    let hwnd = crate::win_cast::raw_to_hwnd(hwnd_raw);
-    if hwnd.0.is_null() {
-        return;
-    }
-    unsafe {
-        if IsIconic(hwnd).as_bool() {
-            let _ = ShowWindow(hwnd, SW_RESTORE);
-        }
-        let _ = SetWindowPos(
-            hwnd,
-            Some(HWND_TOP),
-            0,
-            0,
-            0,
-            0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-        );
-    }
-}
-
 pub fn focus_window(hwnd_raw: isize) -> bool {
     focus_window_impl(hwnd_raw, true)
 }

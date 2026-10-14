@@ -30,8 +30,6 @@ pub struct LauncherController {
     pub selection: ListSelection,
     pub foreground_hwnd: Option<isize>,
     pub stack_snapshot: Option<StackSnapshot>,
-    pub preview_hwnd: Option<isize>,
-    pub preview_active: bool,
     pub visible: bool,
     pub panel_width: f32,
     pub panel_height: f32,
@@ -49,8 +47,6 @@ impl Default for LauncherController {
             selection: ListSelection::default(),
             foreground_hwnd: None,
             stack_snapshot: None,
-            preview_hwnd: None,
-            preview_active: false,
             visible: false,
             panel_width: 480.0,
             panel_height: 420.0,
@@ -73,8 +69,6 @@ impl LauncherController {
             .as_ref()
             .and_then(|s| s.foreground)
             .or_else(|| get_foreground_window().map(|w| w.hwnd));
-        self.preview_hwnd = None;
-        self.preview_active = false;
         self.selection.hovered = None;
         self.query.clear();
         self.last_query.clear();
@@ -150,7 +144,6 @@ impl LauncherController {
         if self.query != self.last_query {
             self.last_query = self.query.clone();
             self.selection.reset_on_query_change();
-            self.preview_active = true;
         }
     }
 
@@ -200,28 +193,22 @@ impl LauncherController {
             }
             LauncherAction::Navigate(delta) => {
                 self.selection.navigate(filtered.len(), delta);
-                self.preview_active = true;
                 LauncherEffect::None
             }
             LauncherAction::Hover(hovered) => {
                 if let Some(row) = hovered {
                     self.selection.hover(row, filtered.len());
-                    self.preview_active = true;
                 }
                 LauncherEffect::None
             }
             LauncherAction::Commit(hwnd) => {
                 self.stack_snapshot = None;
-                self.preview_hwnd = None;
-                self.preview_active = false;
                 self.selection.hovered = None;
                 self.visible = false;
                 LauncherEffect::Focus(hwnd)
             }
             LauncherAction::Cancel => {
                 let snapshot = self.stack_snapshot.take();
-                self.preview_hwnd = None;
-                self.preview_active = false;
                 self.selection.hovered = None;
                 self.visible = false;
                 snapshot.map_or(LauncherEffect::None, LauncherEffect::RestoreStack)
@@ -246,25 +233,6 @@ impl LauncherController {
         }
     }
 
-    pub fn post_frame_effects(&mut self, filtered: &[usize]) -> LauncherEffect {
-        if !self.preview_active {
-            return LauncherEffect::None;
-        }
-        let active_row = self.selection.active_row();
-        let Some(&idx) = filtered.get(active_row) else {
-            return LauncherEffect::None;
-        };
-        let Some(win) = self.windows.get(idx) else {
-            return LauncherEffect::None;
-        };
-        let hwnd = win.hwnd;
-        if self.preview_hwnd == Some(hwnd) {
-            return LauncherEffect::None;
-        }
-        self.preview_hwnd = Some(hwnd);
-        LauncherEffect::Preview(hwnd)
-    }
-
     fn rebuild_search_labels(&mut self) {
         self.search_labels = self
             .windows
@@ -283,7 +251,6 @@ pub enum LauncherEffect {
     None,
     Focus(isize),
     RestoreStack(StackSnapshot),
-    Preview(isize),
 }
 
 impl LauncherEffect {
@@ -294,9 +261,6 @@ impl LauncherEffect {
                 let _ = focus::focus_window(hwnd);
             }
             Self::RestoreStack(snapshot) => restore_stack_snapshot(&snapshot),
-            Self::Preview(hwnd) => {
-                focus::preview_window(hwnd);
-            }
         }
     }
 }
@@ -402,12 +366,24 @@ mod tests {
     }
 
     #[test]
-    fn post_frame_effects_returns_preview_for_active_row() {
-        let mut controller = sample_controller(vec![test_window(9, "Nine", "nine")]);
-        controller.preview_active = true;
-        controller.selection.selected = 0;
-        let effect = controller.post_frame_effects(&[0]);
-        assert!(matches!(effect, LauncherEffect::Preview(9)));
+    fn hover_and_navigate_never_focus_windows() {
+        let mut controller = sample_controller(vec![
+            test_window(1, "One", "one"),
+            test_window(2, "Two", "two"),
+        ]);
+        let filtered = vec![0, 1];
+        let effect = controller.handle_action(
+            LauncherAction::Hover(Some(1)),
+            &crate::modes::marks::shared_marks(),
+            &filtered,
+        );
+        assert!(matches!(effect, LauncherEffect::None));
+        let effect = controller.handle_action(
+            LauncherAction::Navigate(1),
+            &crate::modes::marks::shared_marks(),
+            &filtered,
+        );
+        assert!(matches!(effect, LauncherEffect::None));
     }
 
     #[test]

@@ -41,7 +41,6 @@ impl LauncherPanel {
         log::debug("launcher hide");
         self.controller.visible = false;
         self.lifecycle.reset();
-        self.controller.preview_hwnd = None;
         hide_overlay_viewport(ctx);
     }
 
@@ -114,9 +113,6 @@ impl LauncherPanel {
                 .handle_action(action, marks, &filtered)
                 .apply();
         }
-
-        let preview_effect = self.controller.post_frame_effects(&filtered);
-        preview_effect.apply();
 
         if !self.controller.visible {
             hide_overlay_viewport(&ctx);
