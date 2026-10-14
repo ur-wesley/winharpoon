@@ -58,10 +58,24 @@ pub fn egui_key_to_vk(key: egui::Key) -> u32 {
         egui::Key::Backspace => 0x08,
         egui::Key::Enter => 0x0D,
         egui::Key::Escape => 0x1B,
+        egui::Key::Delete => 0x2E,
+        egui::Key::Insert => 0x2D,
+        egui::Key::Home => 0x24,
+        egui::Key::End => 0x23,
+        egui::Key::PageUp => 0x21,
+        egui::Key::PageDown => 0x22,
         egui::Key::ArrowLeft => 0x25,
         egui::Key::ArrowUp => 0x26,
         egui::Key::ArrowRight => 0x27,
         egui::Key::ArrowDown => 0x28,
+        egui::Key::F13 => 0x7C,
+        egui::Key::F14 => 0x7D,
+        egui::Key::F15 => 0x7E,
+        egui::Key::F16 => 0x7F,
+        egui::Key::F17 => 0x80,
+        egui::Key::F18 => 0x81,
+        egui::Key::F19 => 0x82,
+        egui::Key::F20 => 0x83,
         egui::Key::OpenBracket => 0xDB,
         egui::Key::CloseBracket => 0xDD,
         egui::Key::Backtick => 0xC0,
@@ -168,9 +182,26 @@ mod tests {
     #[test]
     fn chord_builder_rejects_modifiers() {
         let mods = eframe::egui::Modifiers::CTRL;
-        // Delete is unmapped (falls to `_ => 0`) so no chord is produced.
-        assert!(chord_from_egui_key(eframe::egui::Key::Delete, mods).is_none());
+        assert!(chord_from_egui_key(eframe::egui::Key::Copy, mods).is_none());
         assert!(chord_from_egui_key(eframe::egui::Key::K, mods).is_some());
         assert_eq!(mods_from_egui(mods), 0x0002);
+    }
+
+    #[test]
+    fn navigation_keys_map_to_vks() {
+        assert_eq!(egui_key_to_vk(eframe::egui::Key::ArrowLeft), 0x25);
+        assert_eq!(egui_key_to_vk(eframe::egui::Key::ArrowUp), 0x26);
+        assert_eq!(egui_key_to_vk(eframe::egui::Key::ArrowRight), 0x27);
+        assert_eq!(egui_key_to_vk(eframe::egui::Key::ArrowDown), 0x28);
+        assert_eq!(egui_key_to_vk(eframe::egui::Key::Delete), 0x2E);
+        assert_eq!(egui_key_to_vk(eframe::egui::Key::Insert), 0x2D);
+        assert_eq!(egui_key_to_vk(eframe::egui::Key::Home), 0x24);
+        assert_eq!(egui_key_to_vk(eframe::egui::Key::End), 0x23);
+        assert_eq!(egui_key_to_vk(eframe::egui::Key::PageUp), 0x21);
+        assert_eq!(egui_key_to_vk(eframe::egui::Key::PageDown), 0x22);
+        let mods = eframe::egui::Modifiers::CTRL | eframe::egui::Modifiers::ALT;
+        let chord = chord_from_egui_key(eframe::egui::Key::ArrowRight, mods)
+            .expect("arrow chord must build");
+        assert_eq!(chord, "Ctrl+Alt+Right");
     }
 }

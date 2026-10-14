@@ -142,9 +142,27 @@ fn format_vk(vk: u16) -> String {
         0xBB => "Equal".into(),
         0xDB => "BracketLeft".into(),
         0xDD => "BracketRight".into(),
+        0xDC => "Backslash".into(),
+        0xBA => "Semicolon".into(),
+        0xDE => "Quote".into(),
+        0xBC => "Comma".into(),
+        0xBE => "Period".into(),
+        0xBF => "Slash".into(),
         0x20 => "Space".into(),
         0x09 => "Tab".into(),
         0x1B => "Esc".into(),
+        0x08 => "Backspace".into(),
+        0x0D => "Enter".into(),
+        0x2D => "Insert".into(),
+        0x2E => "Delete".into(),
+        0x24 => "Home".into(),
+        0x23 => "End".into(),
+        0x21 => "PageUp".into(),
+        0x22 => "PageDown".into(),
+        0x25 => "Left".into(),
+        0x26 => "Up".into(),
+        0x27 => "Right".into(),
+        0x28 => "Down".into(),
         _ => format!("VK_{vk:04X}"),
     }
 }
@@ -186,7 +204,7 @@ pub fn chord_from_vk_mods(vk: VIRTUAL_KEY, mods: u32) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_chord;
+    use super::{format_vk, parse_chord};
 
     #[test]
     fn parse_chord_rejects_multiple_keys() {
@@ -201,5 +219,34 @@ mod tests {
     #[test]
     fn parse_chord_rejects_unknown_key() {
         assert!(parse_chord("Win+Frobnicate").is_err());
+    }
+
+    #[test]
+    fn format_vk_round_trips_special_keys() {
+        for vk in [
+            0x08, 0x09, 0x0D, 0x1B, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x2D,
+            0x2E, 0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF, 0xC0, 0xDB, 0xDC, 0xDD, 0xDE,
+        ] {
+            let name = format_vk(vk);
+            assert!(
+                !name.starts_with("VK_"),
+                "vk 0x{vk:02X} formatted as fallback {name}"
+            );
+            let parsed = parse_chord(&name).unwrap_or_else(|e| panic!("cannot parse {name}: {e}"));
+            assert_eq!(parsed.vk, vk, "round-trip failed for {name}");
+        }
+    }
+
+    #[test]
+    fn parse_chord_accepts_arrow_keys() {
+        for (chord, vk) in [
+            ("Ctrl+Alt+Left", 0x25),
+            ("Ctrl+Alt+Up", 0x26),
+            ("Ctrl+Alt+Right", 0x27),
+            ("Ctrl+Alt+Down", 0x28),
+        ] {
+            let parsed = parse_chord(chord).expect("arrow chord must parse");
+            assert_eq!(parsed.vk, vk);
+        }
     }
 }
