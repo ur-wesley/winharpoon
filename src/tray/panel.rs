@@ -107,6 +107,21 @@ impl TrayMenuPanel {
                     let marks = state_guard.marks.lock();
                     let _ = marks.store.jump_slot(slot);
                 }
+                TrayAction::UpdateApp => {
+                    let download_url = {
+                        let state_guard = state.lock();
+                        if let crate::updater::UpdateState::Available { download_url, .. } =
+                            &state_guard.update_state
+                        {
+                            Some(download_url.clone())
+                        } else {
+                            None
+                        }
+                    };
+                    if let Some(url) = download_url {
+                        crate::updater::start_download_and_install(state.clone(), url);
+                    }
+                }
             }
             self.hide(&ctx);
         } else {

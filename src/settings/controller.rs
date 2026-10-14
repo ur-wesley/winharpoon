@@ -15,6 +15,9 @@ pub enum SettingsAction {
     Save,
     SelectTab(SettingsTab),
     SetAutostart(bool),
+    SetCheckUpdatesOnStartup(bool),
+    CheckForUpdates,
+    DownloadAndInstallUpdate,
     SetAltDoubleClick(bool),
     SetAltDoubleClickScope(String),
     SetDoubleTapKey(String),
@@ -96,8 +99,8 @@ impl SettingsController {
     pub fn handle_action(
         &mut self,
         action: SettingsAction,
+        state: &Arc<Mutex<AppState>>,
         config: &Arc<Mutex<Config>>,
-        marks: &crate::modes::marks::SharedMarks,
     ) {
         match action {
             SettingsAction::ResetDefaults => {
@@ -130,6 +133,31 @@ impl SettingsController {
                         self.status = format!("Failed to update autostart: {err}");
                         log::error(format!("autostart toggle failed: {err}"));
                     }
+                }
+            }
+            SettingsAction::SetCheckUpdatesOnStartup(enabled) => {
+                self.draft.general.check_updates_on_startup = enabled;
+                if let Ok(status) = SettingsService::persist_general(&self.draft, config) {
+                    self.validation_errors.clear();
+                    self.status = status;
+                }
+            }
+            SettingsAction::CheckForUpdates => {
+                crate::updater::check_for_updates(state.clone(), true);
+            }
+            SettingsAction::DownloadAndInstallUpdate => {
+                let download_url = {
+                    let state_guard = state.lock();
+                    if let crate::updater::UpdateState::Available { download_url, .. } =
+                        &state_guard.update_state
+                    {
+                        Some(download_url.clone())
+                    } else {
+                        None
+                    }
+                };
+                if let Some(url) = download_url {
+                    crate::updater::start_download_and_install(state.clone(), url);
                 }
             }
             SettingsAction::SetAltDoubleClick(enabled) => {
@@ -167,20 +195,20 @@ impl SettingsController {
                 self.finish_binding(&label, String::new(), config);
             }
             SettingsAction::UnmarkSlot(slot) => {
-                marks.lock().store.unmark_slot(slot);
+                state.lock().marks.lock().store.unmark_slot(slot);
                 self.status = format!("Unmarked slot {slot}.");
             }
             SettingsAction::ClearMarks => {
-                marks.lock().store.clear_slots();
+                state.lock().marks.lock().store.clear_slots();
                 self.status = "Cleared all marks.".into();
             }
             SettingsAction::MoveMarkSlot { slot, up } => {
-                if marks.lock().store.move_mark_slot(slot, up) {
+                if state.lock().marks.lock().store.move_mark_slot(slot, up) {
                     self.status = format!("Moved slot {slot}.");
                 }
             }
             SettingsAction::JumpToSlot(slot) => {
-                if marks.lock().store.jump_slot(slot) {
+                if state.lock().marks.lock().store.jump_slot(slot) {
                     self.status = format!("Focused slot {slot}.");
                 } else {
                     self.status = format!("Slot {slot} window not found.");

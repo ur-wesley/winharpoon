@@ -197,8 +197,6 @@ impl eframe::App for UiApp {
 
             let config = self.config.clone();
 
-            let marks = self.marks.clone();
-
             ctx.show_viewport_deferred(
                 egui::ViewportId::from_hash_of("winharpoon_settings"),
                 egui::ViewportBuilder::default()
@@ -207,7 +205,7 @@ impl eframe::App for UiApp {
                     .with_transparent(true)
                     .with_always_on_top(),
                 move |ui, _class| {
-                    settings.lock().update(ui, &state, &config, &marks);
+                    settings.lock().update(ui, &state, &config);
                 },
             );
         }

@@ -8,7 +8,7 @@ use crate::app::AppState;
 use crate::config::{Config, ConfigValidationError};
 use crate::hotkeys::HotkeyRegistrationResult;
 use crate::icons::ui_icons;
-use crate::modes::marks::{filled_entries, SharedMarks};
+use crate::modes::marks::filled_entries;
 use crate::native_ui;
 use crate::paths;
 use crate::settings::controller::{
@@ -26,7 +26,6 @@ pub fn render_settings(
     controller: &SettingsController,
     state: &Arc<Mutex<AppState>>,
     _config: &Arc<Mutex<Config>>,
-    marks: &SharedMarks,
 ) -> SettingsViewOutput {
     let mut actions = Vec::new();
     let mut capture_ui_used = false;
@@ -112,11 +111,12 @@ pub fn render_settings(
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     if controller.active_tab == SettingsTab::Marks {
-                        render_marks_tab(ui, marks, &mut actions);
+                        render_marks_tab(ui, state, &mut actions);
                     } else {
                         render_settings_tab(
                             ui,
                             controller,
+                            state,
                             &registrations,
                             conflicts,
                             &mut actions,
@@ -137,6 +137,7 @@ pub fn render_settings(
 fn render_general_row(
     ui: &mut egui::Ui,
     controller: &SettingsController,
+    state: &Arc<Mutex<AppState>>,
     actions: &mut Vec<SettingsAction>,
 ) {
     let mut autostart = controller.draft.general.autostart;
@@ -157,6 +158,95 @@ fn render_general_row(
         });
     });
     ui.add_space(10.0);
+
+    let mut check_updates = controller.draft.general.check_updates_on_startup;
+    ui.horizontal(|ui| {
+        ui.vertical(|ui| {
+            ui.set_min_width(220.0);
+            ui.label(
+                egui::RichText::new("Check for updates on startup")
+                    .size(13.5)
+                    .strong(),
+            );
+            native_ui::muted_label(ui, "Automatically check for new versions on GitHub");
+        });
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.checkbox(&mut check_updates, "Enabled").changed() {
+                actions.push(SettingsAction::SetCheckUpdatesOnStartup(check_updates));
+            }
+        });
+    });
+    ui.add_space(10.0);
+
+    let update_state = {
+        let state_guard = state.lock();
+        state_guard.update_state.clone()
+    };
+
+    ui.horizontal(|ui| {
+        ui.vertical(|ui| {
+            ui.set_min_width(220.0);
+            ui.label(
+                egui::RichText::new("Application updates")
+                    .size(13.5)
+                    .strong(),
+            );
+            match &update_state {
+                crate::updater::UpdateState::None => {
+                    native_ui::muted_label(ui, "Running the latest version");
+                }
+                crate::updater::UpdateState::Checking => {
+                    ui.label(
+                        egui::RichText::new("Checking for updates...").color(native_ui::ACCENT),
+                    );
+                }
+                crate::updater::UpdateState::Available { version, .. } => {
+                    ui.label(
+                        egui::RichText::new(format!("Version v{version} is available!"))
+                            .strong()
+                            .color(native_ui::SUCCESS),
+                    );
+                }
+                crate::updater::UpdateState::Downloading { progress } => {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "Downloading update: {:.0}%",
+                            progress * 100.0
+                        ))
+                        .color(native_ui::ACCENT),
+                    );
+                }
+                crate::updater::UpdateState::Downloaded { .. } => {
+                    ui.label(
+                        egui::RichText::new("Update downloaded. Launching installer...")
+                            .strong()
+                            .color(native_ui::SUCCESS),
+                    );
+                }
+                crate::updater::UpdateState::Error(err) => {
+                    ui.colored_label(native_ui::DANGER, format!("Update error: {err}"));
+                }
+            }
+        });
+        ui.with_layout(
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| match &update_state {
+                crate::updater::UpdateState::None | crate::updater::UpdateState::Error(_)
+                    if native_ui::secondary_button(ui, "Check for updates").clicked() =>
+                {
+                    actions.push(SettingsAction::CheckForUpdates);
+                }
+                crate::updater::UpdateState::Available { .. }
+                    if native_ui::primary_button(ui, "Download & Install").clicked() =>
+                {
+                    actions.push(SettingsAction::DownloadAndInstallUpdate);
+                }
+                _ => {}
+            },
+        );
+    });
+    ui.add_space(10.0);
+
     let config_path = paths::config_path();
     native_ui::muted_label(ui, &format!("Config: {}", config_path.display()));
     ui.add_space(6.0);
@@ -245,6 +335,7 @@ fn render_apps_row(
 fn render_settings_tab(
     ui: &mut egui::Ui,
     controller: &SettingsController,
+    state: &Arc<Mutex<AppState>>,
     registrations: &HashMap<String, HotkeyRegistrationResult>,
     conflicts: usize,
     actions: &mut Vec<SettingsAction>,
@@ -253,7 +344,7 @@ fn render_settings_tab(
     native_ui::section_frame().show(ui, |ui| {
         native_ui::section_heading(ui, "General", "Startup and background behavior");
         ui.add_space(10.0);
-        render_general_row(ui, controller, actions);
+        render_general_row(ui, controller, state, actions);
     });
     ui.add_space(12.0);
 
@@ -309,7 +400,11 @@ fn render_settings_tab(
     }
 }
 
-fn render_marks_tab(ui: &mut egui::Ui, marks: &SharedMarks, actions: &mut Vec<SettingsAction>) {
+fn render_marks_tab(
+    ui: &mut egui::Ui,
+    state: &Arc<Mutex<AppState>>,
+    actions: &mut Vec<SettingsAction>,
+) {
     native_ui::section_frame().show(ui, |ui| {
         native_ui::section_heading(
             ui,
@@ -317,13 +412,18 @@ fn render_marks_tab(ui: &mut egui::Ui, marks: &SharedMarks, actions: &mut Vec<Se
             "Jump to, reorder, or remove numbered marks",
         );
         ui.add_space(10.0);
-        render_marks_section(ui, marks, actions);
+        render_marks_section(ui, state, actions);
     });
 }
 
-fn render_marks_section(ui: &mut egui::Ui, marks: &SharedMarks, actions: &mut Vec<SettingsAction>) {
+fn render_marks_section(
+    ui: &mut egui::Ui,
+    state: &Arc<Mutex<AppState>>,
+    actions: &mut Vec<SettingsAction>,
+) {
     let entries = {
-        let guard = marks.lock();
+        let state_guard = state.lock();
+        let guard = state_guard.marks.lock();
         filled_entries(&guard.store)
     };
     ui.horizontal(|ui| {

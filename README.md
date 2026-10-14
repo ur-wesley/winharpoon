@@ -37,7 +37,7 @@ Build the Windows installer (requires [Inno Setup 6](https://jrsoftware.org/isin
 .\scripts\build-installer.ps1
 ```
 
-This produces `dist\WinHarpoon-Setup-1.1.2.exe`. The installer offers a **Start WinHarpoon when Windows starts** option during setup. You can change this anytime in tray → **Settings** → **General**.
+This produces `dist\WinHarpoon-Setup-1.1.3.exe`. The installer offers a **Start WinHarpoon when Windows starts** option during setup. You can change this anytime in tray → **Settings** → **General**.
 
 ## Default hotkeys
 
