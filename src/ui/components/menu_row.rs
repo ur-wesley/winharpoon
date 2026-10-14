@@ -44,7 +44,7 @@ pub fn menu_row(ui: &mut egui::Ui, props: &MenuRowProps<'_>) -> egui::Response {
         }
         let text_rect = egui::Rect::from_min_max(
             egui::pos2(rect.min.x + ROW_TEXT_LEFT, rect.min.y),
-            egui::pos2(rect.max.x - 4.0, rect.max.y),
+            egui::pos2(rect.max.x - 10.0, rect.max.y),
         );
         native_ui::tray_menu_clipped_label(ui, text_rect, props.label, 12.0, text_color);
     }
@@ -111,7 +111,7 @@ pub fn slot_row(ui: &mut egui::Ui, props: &SlotRowProps<'_>) -> egui::Response {
         );
         let text_rect = egui::Rect::from_min_max(
             egui::pos2(rect.min.x + ROW_TEXT_LEFT, rect.min.y),
-            egui::pos2(rect.max.x - 4.0, rect.max.y),
+            egui::pos2(rect.max.x - 10.0, rect.max.y),
         );
         let text_color = if props.filled {
             egui::Color32::from_rgb(210, 214, 226)

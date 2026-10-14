@@ -21,7 +21,7 @@ impl Default for TrayMenuController {
         Self {
             visible: false,
             anchor: TrayClickInfo::default(),
-            panel_width: 220.0,
+            panel_width: 248.0,
         }
     }
 }

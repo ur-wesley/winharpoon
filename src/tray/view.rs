@@ -10,7 +10,7 @@ use crate::tray::controller::TrayAction;
 use crate::ui::components::menu_row::{menu_row, slot_row, MenuRowProps, SlotRowProps, ROW_HEIGHT};
 use crate::ui::components::overlay_panel::{overlay_panel_header, OverlayPanelHeaderProps};
 
-const MENU_WIDTH: f32 = 220.0;
+const MENU_WIDTH: f32 = 248.0;
 
 pub struct TrayMenuViewOutput {
     pub action: Option<TrayAction>,
@@ -142,7 +142,7 @@ pub fn render_tray_menu(ui: &mut egui::Ui, state: &Arc<Mutex<AppState>>) -> Tray
     });
 
     if panel_rect.is_positive() {
-        content_size = egui::vec2(MENU_WIDTH, panel_rect.height());
+        content_size = egui::vec2(panel_rect.width(), panel_rect.height());
     }
 
     TrayMenuViewOutput {
